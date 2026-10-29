@@ -10,7 +10,7 @@ Generated command:
 git ls-files packages/omo-opencode/src packages/omo-codex/src | grep '\.ts$' | sort | xargs awk 'FNR==1 && /^export (\*|\{).*from ["'"'"']@oh-my-opencode\// { print FILENAME }'
 ```
 
-Snapshot date: 2026-08-31. Total shim exports found: 233.
+Snapshot date: 2026-08-31. Total shim exports found: 229.
 
 ## Aggregate By Target Package
 
@@ -26,7 +26,7 @@ Snapshot date: 2026-08-31. Total shim exports found: 233.
 | `@oh-my-opencode/omo-codex` | 41 |
 | `@oh-my-opencode/openclaw-core` | 22 |
 | `@oh-my-opencode/rules-engine` | 4 |
-| `@oh-my-opencode/skills-loader-core` | 65 |
+| `@oh-my-opencode/skills-loader-core` | 61 |
 | `@oh-my-opencode/team-core` | 37 |
 | `@oh-my-opencode/tmux-core` | 3 |
 | `@oh-my-opencode/utils` | 47 |
@@ -114,7 +114,6 @@ Snapshot date: 2026-08-31. Total shim exports found: 233.
 | `packages/omo-opencode/src/features/opencode-runtime-skills/skill-markdown.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-runtime-skills/source-server.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/allowed-tools-parser.ts` | `@oh-my-opencode/skills-loader-core` |
-| `packages/omo-opencode/src/features/opencode-skill-loader/config-source-discovery.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/git-master-template-injection.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/index.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/loaded-skill-from-path.ts` | `@oh-my-opencode/skills-loader-core` |
@@ -122,11 +121,9 @@ Snapshot date: 2026-08-31. Total shim exports found: 233.
 | `packages/omo-opencode/src/features/opencode-skill-loader/loader.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/merger.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/merger/builtin-skill-converter.ts` | `@oh-my-opencode/skills-loader-core` |
-| `packages/omo-opencode/src/features/opencode-skill-loader/merger/config-skill-entry-loader.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/merger/scope-priority.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/merger/skill-definition-merger.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/merger/skills-config-normalizer.ts` | `@oh-my-opencode/skills-loader-core` |
-| `packages/omo-opencode/src/features/opencode-skill-loader/opencode-config-skills-reader.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/skill-content.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/skill-deduplication.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/features/opencode-skill-loader/skill-definition-record.ts` | `@oh-my-opencode/skills-loader-core` |
@@ -250,7 +247,6 @@ Snapshot date: 2026-08-31. Total shim exports found: 233.
 | `packages/omo-opencode/src/shared/record-type-guard.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/replace-tool-args.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/session-idle-settle.ts` | `@oh-my-opencode/utils` |
-| `packages/omo-opencode/src/shared/skill-path-resolver.ts` | `@oh-my-opencode/skills-loader-core` |
 | `packages/omo-opencode/src/shared/snake-case.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/tmux/cmux-detect.ts` | `@oh-my-opencode/tmux-core` |
 | `packages/omo-opencode/src/shared/tmux/runner.ts` | `@oh-my-opencode/tmux-core` |
