@@ -63,7 +63,7 @@ impl MacInput {
                             mouse.map(|hold| hold.button))?;
                         if let Some(hold) = mouse.filter(|hold| hold.button == MouseButton::Left) {
                             let press = LeftPress { kind: "mouse hold", window: &window, start: (hold.x, hold.y) };
-                            refuse_drag_source(press, |x, y| crate::ax::role_at(pid, x, y))?;
+                            refuse_drag_source(press, |x, y| crate::ax::role_at(pid, wid, x, y))?;
                         }
                         if mouse.is_none_or(|hold| !hold.keys.is_empty()) {
                             guard::prepare_keys(&window, pid, wid, capture)?;

@@ -140,7 +140,7 @@ impl MacInput {
                         )?;
                         if let Some(start) = drag_start(&event) {
                             let press = LeftPress { kind: "drag", window: &window, start };
-                            refuse_drag_source(press, |x, y| crate::ax::role_at(pid, x, y))?;
+                            refuse_drag_source(press, |x, y| crate::ax::role_at(pid, wid, x, y))?;
                         }
                         if !window.focused {
                             skylight::activate_without_raise(pid, wid)?;

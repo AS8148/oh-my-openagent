@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 
 use super::{
-    drag_session_outcome, picked_up_refusal, refuse_drag_source, stroke_path, LeftPress, Stroke,
-    DRAG_TRACKING_ROLES,
+    drag_session_outcome, picked_up_refusal, refuse_drag_source, stroke_path, LeftPress,
+    StartPoint, Stroke, DRAG_TRACKING_ROLES,
 };
 use crate::error::{DesktopError, ErrorCode};
 use crate::types::DesktopWindow;
@@ -34,16 +34,18 @@ fn background_drags_and_holds_run_only_on_controls_that_track_them() {
         };
         // Finder's icons and rows, a table cell, and anything unread can begin
         // a drag-and-drop session.
-        for role in [
-            Some("AXImage"),
-            Some("AXRow"),
-            Some("AXCell"),
-            Some("AXWebArea"),
-            None,
+        let role = |name: &str| StartPoint::Role(name.to_string());
+        for start in [
+            role("AXImage"),
+            role("AXRow"),
+            role("AXCell"),
+            role("AXWebArea"),
+            StartPoint::Unread,
+            StartPoint::Covered,
         ] {
-            let error = refuse_drag_source(press, |_, _| role.map(str::to_string))
+            let error = refuse_drag_source(press, |_, _| start.clone())
                 .expect_err("refused before posting");
-            assert_eq!(error.code, ErrorCode::BackgroundUnavailable, "{role:?}");
+            assert_eq!(error.code, ErrorCode::BackgroundUnavailable, "{start:?}");
             assert!(
                 error.message.contains("nothing was sent"),
                 "{}",
@@ -57,8 +59,15 @@ fn background_drags_and_holds_run_only_on_controls_that_track_them() {
                 error.message
             );
         }
-        for role in DRAG_TRACKING_ROLES {
-            refuse_drag_source(press, |_, _| Some(role.to_string())).expect(role);
+        // A covering window of the same application is named as such.
+        let error = refuse_drag_source(press, |_, _| StartPoint::Covered).expect_err("covered");
+        assert!(
+            error.message.contains("another window of the application"),
+            "{}",
+            error.message
+        );
+        for name in DRAG_TRACKING_ROLES {
+            refuse_drag_source(press, |_, _| role(name)).expect(name);
         }
     }
     // The point read is where the press goes down.
@@ -70,7 +79,7 @@ fn background_drags_and_holds_run_only_on_controls_that_track_them() {
     };
     assert!(refuse_drag_source(press, |x, y| {
         at.set(Some((x, y)));
-        None
+        StartPoint::Unread
     })
     .is_err());
     assert_eq!(at.get(), Some((3.0, 4.0)));
