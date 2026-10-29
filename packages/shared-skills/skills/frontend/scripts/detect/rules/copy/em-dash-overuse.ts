@@ -1,3 +1,4 @@
+import { EM_DASH } from "../../core/characters"
 import { ancestors, descendants, parentOf } from "../../core/page"
 import type { PageRule } from "../../rule"
 import { lineage, visibleText } from "./support/page-text"
@@ -11,12 +12,12 @@ export const emDashOveruse: PageRule = {
 	check: ({ snapshot }) => {
 		const runs = snapshot.elements.filter((el) => visibleText(snapshot, el)
 			&& !lineage(snapshot, el).some((a) => ["select", "option", "datalist"].includes(a.tag)))
-			.map((el) => el.ownText).filter((text) => text !== "" && !/^[—–\s-]+$/.test(text))
+			.map((el) => el.ownText).filter((text) => text !== "" && !/^[\u2014–\s-]+$/.test(text))
 		const text = runs.join(" ").replace(/\s+/g, " ")
 		let count = 0
-		for (const match of text.matchAll(/—+|-+/g)) {
+		for (const match of text.matchAll(/\u2014+|-+/g)) {
 			const run = match[0]
-			if (run.startsWith("—")) count += run.length === 2 ? 1 : run.length
+			if (run.startsWith(EM_DASH)) count += run.length === 2 ? 1 : run.length
 			else {
 				const next = text[match.index + run.length] ?? ""
 				const previous = text[match.index - 1] ?? ""
@@ -27,7 +28,7 @@ export const emDashOveruse: PageRule = {
 		const groups = new Map<number | null, number>()
 		for (const li of snapshot.elements.filter((el) => el.tag === "li").slice(0, 2000)) {
 			if (!visibleText(snapshot, li) || [...descendants(snapshot, li)].some((d) => d.tag === "li")) continue
-			const parts = li.text.replace(/^[^\p{L}\p{N}]+/u, "").split("—")
+			const parts = li.text.replace(/^[^\p{L}\p{N}]+/u, "").split(EM_DASH)
 			const term = (parts[0] ?? "").trim()
 			const rest = (parts[1] ?? "").trim()
 			if (term === "" || [...term].length > 60 || term.split(/\s+/).length > 6 || /[.!?。！？]/.test(term) || rest === "") continue
