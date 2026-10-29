@@ -12,11 +12,6 @@ use crate::worker::Worker;
 
 impl Worker {
     pub(crate) fn prepare_escape(&mut self) -> CoreResult<()> {
-        // Preserve the existing stop-path refusal before probing a backend
-        // that may itself be unavailable; no input may precede either check.
-        if let Some(refused) = crate::mutate::interruption(&self.safety.supervisor, &self.stop_policy()) {
-            return Err(refused);
-        }
         self.watch_user_input();
         let stop = Arc::clone(&self.escape);
         self.backend()?.watch_escape(stop)?;
@@ -33,6 +28,12 @@ impl Worker {
             || crate::grant::posts_globally(mutation);
         if !held && !takeover {
             return Ok(None);
+        }
+        // Input keeps the existing stop-path refusal before probing a backend
+        // that may be unavailable. Acquiring a grant alone is not input.
+        if let Some(refused) = crate::mutate::interruption(&self.safety.supervisor, &self.stop_policy()) {
+            self.release_control();
+            return Err(refused);
         }
         if let Err(error) = self.prepare_escape() {
             self.release_control();
