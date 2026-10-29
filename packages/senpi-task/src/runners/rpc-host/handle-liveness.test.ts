@@ -17,14 +17,14 @@ afterEach(() => {
 
 function stalledSession(confirmClose: () => Promise<void> = () => Promise.resolve()) {
   const delivered = Promise.withResolvers<undefined>()
-  const aborted = Promise.withResolvers<void>()
-  const closing = Promise.withResolvers<void>()
+  const aborted = Promise.withResolvers<undefined>()
+  const closing = Promise.withResolvers<undefined>()
   const lifecycle: string[] = []
   const port = fakeSessionPort(async command => {
     if ("message" in command && command.message === "continue") delivered.resolve(undefined)
     if (command.type === "abort") {
       lifecycle.push("abort")
-      aborted.resolve()
+      aborted.resolve(undefined)
     }
   })
   const state = Promise.withResolvers<HostSessionLiveness>()
@@ -34,7 +34,7 @@ function stalledSession(confirmClose: () => Promise<void> = () => Promise.resolv
     client: { ...port, getState: () => state.promise, closeConfirmed: async () => {
       closes++
       lifecycle.push("close")
-      closing.resolve()
+      closing.resolve(undefined)
       await closed.promise
       await confirmClose()
     } },
@@ -79,10 +79,10 @@ test("missed state probes keep the original child nonterminal and recover steeri
 
 test("an overdue session is aborted and closed before reporting terminal", async () => {
   clock = fakeClock()
-  const confirmation = Promise.withResolvers<void>()
-  const confirming = Promise.withResolvers<void>()
+  const confirmation = Promise.withResolvers<undefined>()
+  const confirming = Promise.withResolvers<undefined>()
   const h = stalledSession(() => {
-    confirming.resolve()
+    confirming.resolve(undefined)
     return confirmation.promise
   })
   const terminal = h.handle.waitForExit().then(() => { h.lifecycle.push("terminal") })
@@ -98,7 +98,7 @@ test("an overdue session is aborted and closed before reporting terminal", async
   h.closed.resolve(undefined)
   await confirming.promise
   expect(h.handle.hasExited()).toBe(false)
-  confirmation.resolve()
+  confirmation.resolve(undefined)
   await terminal
   expect(h.handle.hasExited()).toBe(true)
   expect(h.lifecycle).toEqual(["abort", "close", "terminal"])
