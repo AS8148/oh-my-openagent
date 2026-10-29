@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import type { AccountSessionOptions, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 import type { DesktopSyncAccount } from "./account-source"
+import * as syncRuntime from "../sync-runtime"
 import { createDeviceSessionResolver, type DeviceSessionRuntime } from "./resolver"
 
 function fixture() {
@@ -11,6 +12,7 @@ function fixture() {
   const account: DesktopSyncAccount = {
     kind: "desktop",
     descriptor: {
+      genesis: "supported", rpId: "recovery.example.test", userName: "desktop-account",
       serviceOrigin: "https://api.example.test",
       accountId: "desktop-account",
       serviceDeviceId: "service-device",
@@ -19,6 +21,7 @@ function fixture() {
       generation: "generation-1",
     },
     signal: lifetime.signal,
+    boundary: async dispatch => dispatch(),
     keyring: {
       principal: () => principal,
       publicKeys: () => publicKeys,
@@ -53,6 +56,7 @@ function fixture() {
     },
     devices: async () => [],
     isCurrent: async () => !lifetime.signal.aborted,
+    forOperation: async () => { throw new Error("unexpected ceremony") },
   }
   const calls: AccountSessionOptions[] = []
   let factoryCalls = 0
@@ -65,9 +69,9 @@ function fixture() {
     sealer: { seal: async () => ({ bytes: new Uint8Array(), epoch: 1, link: "", recordSig: "" }) },
   }
   const runtime: DeviceSessionRuntime = {
-    GitSpaceConfig: class { get() { return null }; set() {} },
+    ...syncRuntime,
     listRemotes: () => [],
-    resolveSpace: () => ({ spaceId: "00".repeat(16), profile: "personal" }),
+    resolveSpace: () => syncRuntime.resolveSpace({ get: () => null, set: () => undefined }, { profile: "personal" }),
     deviceKeyringFromMaterial: async () => {
       factoryCalls++
       throw new Error("PRIVATE-MATERIAL-CANARY")

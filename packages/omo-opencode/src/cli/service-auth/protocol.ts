@@ -27,6 +27,8 @@ export const grantSchema = tokenSchema.extend({
 export const credentialSchema = grantSchema.extend({
   signingPrivateKey: nonempty, sealingPrivateKey: nonempty,
   refreshState: z.literal("uncertain").optional(),
+  credentialGeneration: nonempty.optional(),
+  accountId: nonempty.optional(),
 })
 export type Credentials = z.infer<typeof credentialSchema>
 export const deviceCodeSchema = z.object({

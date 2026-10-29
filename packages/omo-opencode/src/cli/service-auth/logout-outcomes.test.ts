@@ -87,6 +87,7 @@ test("logout waits for journal persistence acknowledgment before dispatching ref
   const api = fakeApi(request => request.method === "DELETE" ? new Response(null, { status: 204 }) : Response.json(grant))
   const base = memorySecrets().store(api)
   await base.write(expired)
+  const persisted = await base.read()
   const store = { ...base, write: async (value: Credentials) => {
     if (value.refreshState === "uncertain") {
       entered.resolve()
@@ -105,7 +106,7 @@ test("logout waits for journal persistence acknowledgment before dispatching ref
   onTestFinished(async () => { permit.resolve(); await logout; fetcher.mockRestore() })
   await Promise.race([entered.promise, logout.then(() => { throw new Error("logout skipped its journal") })])
   expect(dispatched).toBe(0)
-  expect(await base.read()).toEqual(expired)
+  expect(await base.read()).toEqual(persisted)
   permit.resolve()
   expect(await logout).toBe(true)
   expect(dispatched).toBe(2)

@@ -1,7 +1,5 @@
-import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
-import { withLock } from "@oh-my-opencode/team-core/team-state-store/locks"
+import { withCredentialLock } from "./credential-lock"
 import { signInHint } from "./accounts-gate"
 import { credentialId, type CredentialStore, CredentialStoreError } from "./keystore"
 import {
@@ -40,19 +38,16 @@ const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required", 
 export function createSession(options: { readonly api: string; readonly store: CredentialStore; readonly home?: string; readonly signal?: AbortSignal }) {
   const api = serviceOrigin(options.api)
   const { store, signal } = options
-  const directory = join(options.home ?? homedir(), ".omo", "session-locks")
-  const lockPath = join(directory, `${credentialId(api)}.lock`)
   const markerPath = signedOutMarkerPath(options.home ?? homedir(), credentialId(api))
   async function locked<T>(action: () => Promise<T>): Promise<T> {
-    await mkdir(directory, { recursive: true, mode: 0o700 })
     signal?.throwIfAborted()
-    return withLock(
-      lockPath,
+    return withCredentialLock(
+      api,
       async () => {
         signal?.throwIfAborted()
         return action()
       },
-      { ownerTag: "cli-session", staleAfterMs: Number.POSITIVE_INFINITY },
+      options.home,
     )
   }
   const request = (path: string, init: RequestInit) => requestApi(api, path, init, signal)
