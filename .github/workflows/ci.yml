@@ -323,14 +323,12 @@ jobs:
       # exit-tolerant, so it can never fail the job. The follow-up fix removes it.
       - name: Print Git Bash temp mapping (#11259 diagnostic)
         if: needs.ci-mode.outputs.run_heavy == 'true' && runner.os == 'Windows' && matrix.shard == '2/2' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
-        shell: bash
+        # pwsh starts the Git Bash the tests spawn, so this step never runs under shell: bash itself
+        # (script/ci-root-test-partition.test.ts forbids that in the root-test steps).
+        shell: pwsh
         run: |
-          echo "TEMP=$TEMP" || true
-          echo "TMP=$TMP" || true
-          echo "TMPDIR=$TMPDIR" || true
-          cygpath -u "$TEMP" || true
-          cygpath -w /tmp || true
-          ls -ld /tmp || true
+          & "$env:ProgramFiles\Git\bin\bash.exe" -c 'echo "TEMP=$TEMP"; echo "TMP=$TMP"; echo "TMPDIR=$TMPDIR"; cygpath -u "$TEMP"; cygpath -w /tmp; ls -ld /tmp'
+          exit 0
 
       # Git Bash sets SHELL/MSYSTEM on Windows, which makes process-platform
       # tests observe sh instead of the native PowerShell/cmd execution path.
