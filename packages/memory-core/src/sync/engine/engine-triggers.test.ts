@@ -85,7 +85,10 @@ test("a local commit starts a cycle after a 2 s debounce, once for a burst", asy
   expect([await b.read("x.md"), await b.read("y.md")]).toEqual(["x\n", "y\n"])
 }, GIT_TEST_TIMEOUT)
 
-test.each([false, true])("a local commit queued during a successful cycle reruns unless stopped=%s (omo #11057)", async (stop) => {
+for (const { name, stop } of [
+  { name: "reruns when not stopped", stop: false },
+  { name: "does not rerun once stopped", stop: true },
+]) test(`a local commit queued during a successful cycle ${name} (omo #11057)`, async () => {
   // given: hold a successful push after its capture, with no stream or poll subscribed
   const { server, a, b } = await started()
   const entered = Promise.withResolvers<void>()
@@ -130,6 +133,25 @@ test.each([false, true])("a local commit queued during a successful cycle reruns
     expect(await b.read("later.md")).toBe("later\n")
   }
 }, GIT_TEST_TIMEOUT * 2)
+
+test("a stream-connected device's own pushed head echoed back during its cycle starts no extra cycle (omo #11057)", async () => {
+  // given: a started device subscribed to the stream; the server echoes every append to every listener, the pusher too
+  const { a } = await started()
+  a.engine.start()
+  await a.engine.nextCycle()
+  expect(a.engine.cyclesRun).toBe(1)
+
+  // when: a local commit is pushed by the debounced cycle
+  await a.write("x.md", "x\n")
+  const pushed = a.engine.nextCycle()
+  a.engine.notifyLocalCommit()
+  a.clock.advance(LOCAL_DEBOUNCE_MS)
+  expect((await pushed).pushed).toBe(true)
+
+  // then: the echo of its own head, already applied by that cycle, queues nothing; stop() drains any cycle that did start
+  await a.engine.stop()
+  expect(a.engine.cyclesRun).toBe(2)
+}, GIT_TEST_TIMEOUT)
 
 test("a cycle that fails settles nextCycle() with that failure, and a request queued while it ran still gets its cycle (omo #10637)", async () => {
   const { b } = await started()
