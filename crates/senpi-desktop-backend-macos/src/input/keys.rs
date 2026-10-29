@@ -267,9 +267,10 @@ pub(super) fn post_bare_keys(
             if down {
                 before_press()?;
                 check_press()?;
+                post_bare(code, true)?;
+                // Only a press that went out is released later.
                 held.key_down(HeldKey { route: KeyRoute::Global, code, text: None });
                 pressed.push(code);
-                post_bare(code, true)?;
             } else {
                 post_bare(code, false)?;
                 held.key_up(KeyRoute::Global, code);
@@ -295,8 +296,10 @@ pub(super) fn post_bare_keys(
 }
 
 /// One bare key transition at the HID tap: a null source and no flag or
-/// Unicode overrides (`CGEventCreateKeyboardEvent(NULL, ...)`), so the
-/// event carries no engine tag and no overridden flags.
+/// Unicode overrides (`CGEventCreateKeyboardEvent(NULL, ...)`), so
+/// CoreGraphics derives the modifier state as for a hardware keyboard; the
+/// event still carries the engine tag the user-input watch tells ours by
+/// ([`super::cgevent::bare_keyboard_event`]).
 fn post_bare(code: u16, down: bool) -> CoreResult<()> {
     let event = super::cgevent::bare_keyboard_event(code, down)?;
     event.post(CGEventTapLocation::HID);
