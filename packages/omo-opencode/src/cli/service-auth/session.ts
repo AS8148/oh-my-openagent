@@ -1,9 +1,7 @@
-import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
-import { withLock } from "@oh-my-opencode/team-core/team-state-store/locks"
+import { withCredentialLock } from "./credential-lock"
 import { signInHint } from "./accounts-gate"
-import { credentialId, type CredentialStore, CredentialStoreError } from "./keystore"
+import { CredentialIdentityChanged, credentialId, type CredentialStore, CredentialStoreError } from "./keystore"
 import {
   ApiRefusal,
   type ChooseDevice,
@@ -40,19 +38,16 @@ const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required", 
 export function createSession(options: { readonly api: string; readonly store: CredentialStore; readonly home?: string; readonly signal?: AbortSignal }) {
   const api = serviceOrigin(options.api)
   const { store, signal } = options
-  const directory = join(options.home ?? homedir(), ".omo", "session-locks")
-  const lockPath = join(directory, `${credentialId(api)}.lock`)
   const markerPath = signedOutMarkerPath(options.home ?? homedir(), credentialId(api))
   async function locked<T>(action: () => Promise<T>): Promise<T> {
-    await mkdir(directory, { recursive: true, mode: 0o700 })
     signal?.throwIfAborted()
-    return withLock(
-      lockPath,
+    return withCredentialLock(
+      api,
       async () => {
         signal?.throwIfAborted()
         return action()
       },
-      { ownerTag: "cli-session", staleAfterMs: Number.POSITIVE_INFINITY },
+      options.home,
     )
   }
   const request = (path: string, init: RequestInit) => requestApi(api, path, init, signal)
@@ -105,13 +100,14 @@ export function createSession(options: { readonly api: string; readonly store: C
     signedOutMarker: () => readSignedOutMarker(markerPath),
     clearSignedOutMarker: () => clearSignedOutMarker(markerPath),
     async update<T>(action: (current: Credentials | null) => Promise<T>): Promise<T> {
-      return locked(async () => action(await store.read()))
+      // Under the lock only a read started now is authoritative: a coalesced read may predate another writer.
+      return locked(async () => action(await store.readAuthoritative()))
     },
     async logout(): Promise<boolean> {
       return locked(async () => {
         let current: Credentials | null = null
         try {
-          current = await store.read()
+          current = await store.readAuthoritative()
           if (current !== null) {
             if (current.refreshState === "uncertain") return false
             const access = Date.parse(current.accessTokenExpiresAt) <= Date.now() ? await refreshedAccess(current) : current.accessToken
@@ -133,10 +129,12 @@ export function createSession(options: { readonly api: string; readonly store: C
         }
       })
     },
-    async accessToken(): Promise<string> {
+    /** `expect` rejects a stored credential that is no longer the caller's captured identity before any refresh. */
+    async accessToken(expect?: (current: Credentials) => boolean): Promise<string> {
       return locked(async () => {
-        const current = await store.read()
+        const current = await store.readAuthoritative()
         if (current === null) throw new SignInError(`Not signed in. ${signInHint("first")}`)
+        if (expect !== undefined && !expect(current)) throw new CredentialIdentityChanged()
         return refreshedAccess(current)
       })
     },

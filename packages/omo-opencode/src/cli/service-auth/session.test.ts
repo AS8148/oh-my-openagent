@@ -67,11 +67,12 @@ describe("credential lifecycle", () => {
     const api = fakeApi(() => Response.json({ ...grant, refreshToken: "rotated" }))
     const store = secrets.store(api)
     await store.write({ ...grant, ...privateKeys, accessTokenExpiresAt: "2000-01-01T00:00:00Z" })
+    const persisted = await store.read()
     const session = createSession({
       api, home: await temporaryHome(),
       store: { ...store, write: async () => { throw new Error("store unavailable") } },
     })
     await expect(session.accessToken()).rejects.toThrow()
-    expect(await store.read()).toEqual({ ...grant, ...privateKeys, accessTokenExpiresAt: "2000-01-01T00:00:00Z" })
+    expect(await store.read()).toEqual(persisted)
   })
 })
