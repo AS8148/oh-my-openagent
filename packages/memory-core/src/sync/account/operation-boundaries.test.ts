@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test"
 import * as fs from "node:fs/promises"
+import { basename } from "node:path"
 import * as journal from "../../journal/fsync.ts"
 import { renameWithContentionRetry } from "../../fs/rename-contention.ts"
 import { signedAppend } from "../recovery/keyring-append.ts"
@@ -83,7 +84,7 @@ test("published pin finishes parent fsync and readback even when its owner retir
   cleanup.push(() => syncedSpy.mockRestore())
   await expect(pinTrustAnchor(f.input.pinDir, ACCOUNT, result.state.pin, operation)).rejects.toThrow()
   expect((await loadTrustAnchor(f.input.pinDir, ACCOUNT)).ok).toBe(true)
-  expect(synced.some((path) => path.endsWith("/trust-anchor"))).toBe(true)
+  expect(synced.some((path) => basename(path) === "trust-anchor")).toBe(true)
 })
 
 test("raw rename EINTR retry cannot bypass retired authority", async () => {
@@ -153,7 +154,7 @@ test("published intent finishes durability after cancellation and resumes withou
   const original = fs.rename
   const renamed = spyOn(fs, "rename").mockImplementation(async (from, to) => {
     await original(from, to)
-    if (String(to).includes("/genesis-intent/")) controller.abort()
+    if (String(to).split(/[\\/]/).includes("genesis-intent")) controller.abort()
   })
   cleanup.push(() => renamed.mockRestore())
   const synced: string[] = []
@@ -161,7 +162,7 @@ test("published intent finishes durability after cancellation and resumes withou
   const syncSpy = spyOn(journal, "syncJournalDirectory").mockImplementation(async (path) => { synced.push(path); await sync(path) })
   cleanup.push(() => syncSpy.mockRestore())
   await expect(enableSync({ ...f.input, ...operation })).rejects.toMatchObject({ name: "AbortError" })
-  expect(synced.some((path) => path.endsWith("/genesis-intent"))).toBe(true)
+  expect(synced.some((path) => basename(path) === "genesis-intent")).toBe(true)
   expect(f.entries).toHaveLength(0)
   renamed.mockRestore()
   expect(await enableSync(f.input)).toEqual({ kind: "joined", created: true })
