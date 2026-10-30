@@ -112,6 +112,9 @@ describe("feedback component", () => {
       ? { ...grant, ...privateKeys, accessTokenExpiresAt: "2000-01-01T00:00:00.000Z" }
       : { ...grant, ...privateKeys, refreshState: "uncertain" as const }
     await store.write(credentials)
+    const stored = await store.read()
+    expect(stored).toMatchObject(credentials)
+    expect(typeof stored?.credentialGeneration).toBe("string")
     await component.register(api, { logger: console, config: { getFlag: () => undefined } })
     const levels: (string | undefined)[] = []
     const ctx = { ...sessionCtx, ui: { input: async () => undefined, select: async () => "Send report", notify: (_message: string, level?: string) => levels.push(level) } }
@@ -121,7 +124,7 @@ describe("feedback component", () => {
     expect(new Headers(requests[0]?.headers).has("authorization")).toBe(false)
     expect(levels).toEqual(["warning", "info"])
     expect(refreshes).toEqual([])
-    expect(await store.read()).toEqual(credentials)
+    expect(await store.read()).toEqual(stored)
   })
 
   test.each([401, 403, "network"] as const)("#given a %s failure #when /bug sends #then authentication and network actions stay distinct", async (failure) => {
