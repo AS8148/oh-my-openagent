@@ -1461,8 +1461,6 @@
       "packages/senpi-desktop-engine/src/locator.ts": ["DESKTOP_ENGINE_BINARY", "QUARANTINE_ATTRIBUTE"],
       // pre-existing at origin dev 4686e425b5: unused export(s) HANG_GUARD_MS, CHORD
       "packages/senpi-desktop-engine/test/support/engine.ts": ["HANG_GUARD_MS", "CHORD"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) ELEMENT_SNAPSHOT
-      "packages/senpi-desktop-prelude/test/harness.ts": ["ELEMENT_SNAPSHOT"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
       "packages/senpi-desktop-prelude/test/python-setup.ts": ["default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
