@@ -199,6 +199,7 @@
       "dependencies": {
         "loro-crdt": "1.16.4",
         "yaml": "2.9.1",
+        "zod": "^4.6.5",
       },
     },
     "packages/model-core": {
@@ -437,6 +438,7 @@
       "name": "@oh-my-opencode/team-core",
       "version": "0.1.0",
       "dependencies": {
+        "@oh-my-opencode/memory-core": "workspace:*",
         "@oh-my-opencode/tmux-core": "workspace:*",
         "@oh-my-opencode/utils": "workspace:*",
         "zod": "^4.6.5",

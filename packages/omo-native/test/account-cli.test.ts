@@ -31,6 +31,7 @@ function memoryStore(initial: Credentials | null) {
   let value = initial
   const store: CredentialStore = {
     read: async () => value,
+    readAuthoritative: async () => value,
     write: async next => {
       value = next
     },
@@ -102,8 +103,12 @@ describe("omo account", () => {
     } })
     const result = await run(store, replace ? ["adopt", "--replace"] : ["adopt"], { stdin: JSON.stringify(incoming) })
     expect(result.code).toBe(replace ? ACCOUNT_EXIT.ok : ACCOUNT_EXIT.failed)
-    expect(calls).toEqual(replace ? ["get", "set"] : ["get"])
-    expect(value).toBe(replace ? JSON.stringify(incoming) : "{")
+    expect(calls).toEqual(replace ? ["get", "get", "set"] : ["get"])
+    if (replace) {
+      expect(JSON.parse(value!)).toEqual({ ...incoming, credentialGeneration: expect.any(String) })
+    } else {
+      expect(value).toBe("{")
+    }
   })
 
   test("#given a native read failure #when adopt explicitly replaces #then it does not overwrite an inaccessible item", async () => {
@@ -157,6 +162,7 @@ describe("omo account", () => {
     const calls: string[] = []
     const store: CredentialStore = {
       read: async () => { calls.push("get"); return held },
+      readAuthoritative: async () => { calls.push("get-authoritative"); return held },
       write: async () => { calls.push("set") },
       clear: async () => { calls.push("delete") },
     }
@@ -503,6 +509,7 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
     let reads = 0
     const store: CredentialStore = {
       read: async () => (reads++ === 0 ? credential("dev_r", -60_000) : null),
+      readAuthoritative: async () => (reads++ === 0 ? credential("dev_r", -60_000) : null),
       write: async () => {},
       clear: async () => {},
     }
@@ -513,6 +520,7 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
   test("a keychain that locks mid-refresh keeps its own outcome (7), even when the read after it succeeds", async () => {
     const store: CredentialStore = {
       read: async () => credential("dev_k", -60_000),
+      readAuthoritative: async () => credential("dev_k", -60_000),
       write: async () => {
         throw new KeychainLockedError("macOS Keychain is locked.")
       },
