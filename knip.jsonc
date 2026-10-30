@@ -2131,6 +2131,7 @@
         "script/check-temp-leak-report-only.mjs",
         "script/bun-panic-retry.ts",
         "script/ci-leg-tests-guard.mjs",
+        "script/engine-trust-helper-smoke.ts",
         "script/published-install-smoke.mjs",
         "script/verify-omo-ai-payload.mjs",
         "script/release-announce.ts",
