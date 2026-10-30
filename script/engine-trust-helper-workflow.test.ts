@@ -16,6 +16,10 @@ const workflow = readFileSync(new URL("../.github/workflows/publish-platform.yml
 const signingScript = new URL("../.github/scripts/macos-sign-and-notarize.sh", import.meta.url)
 const engine = sliceWorkflowSection(workflow, "  desktop-engine:\n", "  build:\n")
 const platformBuild = sliceWorkflowSection(workflow, "  build:\n", "  publish:\n")
+const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8").replace(/\r\n/g, "\n")
+const parity = sliceWorkflowSection(ciWorkflow, "  native-binary-parity:\n", "      - name: Compare the binary with the npm launcher\n")
+const parityEngineMarker = "      - name: Build the desktop engine the binary embeds\n"
+const parityBinaryMarker = "      - name: Build the standalone binary and the npm launcher payload\n"
 const buildMarker = "      - name: Build engine trust helper\n"
 const signMarker = "      - name: Sign Darwin engine trust helper\n"
 const smokeMarker = "      - name: Smoke signed Darwin engine trust helper\n"
@@ -250,5 +254,21 @@ describe("engine trust helper transport into the compiled payload", () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+// ci.yml's native-binary-parity job compiles the release binary for darwin-arm64 and windows-x64, where
+// build-omo-binary.ts refuses a payload without the helper; the job must build it, in its own cargo call
+// (a shared call unifies dependency features and builds an engine release never ships).
+describe("native binary parity job", () => {
+  test("builds the engine trust helper for the parity binary in a separate cargo call", () => {
+    const run = runBlock(parity, parityEngineMarker, parityBinaryMarker)
+    const engine = run.indexOf("cargo build --release -p senpi-desktop-engine --locked --target ${{ matrix.rust-target }}")
+    const helper = run.indexOf("cargo build --release -p omo-engine-trust-helper --locked --target ${{ matrix.rust-target }}")
+
+    expect(engine).toBeGreaterThanOrEqual(0)
+    expect(helper).toBeGreaterThan(engine)
+    expect(parity).toContain("target: darwin-arm64")
+    expect(parity).toContain("target: windows-x64")
   })
 })
