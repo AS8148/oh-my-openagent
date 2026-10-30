@@ -265,9 +265,8 @@ describe("createDagManager start", () => {
     // then
     await expect(rejected).rejects.toThrow(DagManagerError)
     await rejected.catch((error: unknown) => {
-      if (!(error instanceof DagManagerError)) throw error
       expect(error).toMatchObject({ code: "invalid_definition" })
-      expect(error.errors.map((entry) => entry.code)).toEqual(["cycle"])
+      expect((error as DagManagerError).errors.map((entry) => entry.code)).toEqual(["cycle"])
     })
     expect(runFiles(store)).toEqual([])
     expect(fs.existsSync(store.paths.keys) ? fs.readdirSync(store.paths.keys) : []).toEqual([])
@@ -285,9 +284,8 @@ describe("createDagManager start", () => {
     // then
     await expect(rejected).rejects.toThrow(DagManagerError)
     await rejected.catch((error: unknown) => {
-      if (!(error instanceof DagManagerError)) throw error
-      expect(error.errors.map((entry) => entry.code)).toEqual(["node_count_exceeded"])
-      expect(error.message).toContain("max_nodes_per_run 1")
+      expect((error as DagManagerError).errors.map((entry) => entry.code)).toEqual(["node_count_exceeded"])
+      expect((error as DagManagerError).message).toContain("max_nodes_per_run 1")
     })
     expect(runFiles(store)).toEqual([])
   })
