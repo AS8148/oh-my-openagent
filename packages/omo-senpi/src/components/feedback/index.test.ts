@@ -76,6 +76,18 @@ const sessionCtx = {
 }
 
 describe("feedback component", () => {
+  test.each(["description", "identity", "environment", "session", "logs", "crash", "config", undefined, "unknown"])("#given a secret refusal naming %j #when submitted over RPC #then the runtime preserves the validated section", async (sectionId) => {
+    const { api, handlers, component } = host({
+      withRedactor: true,
+      response: () => Response.json({ error: { code: "secret_detected", detail: { sectionId } } }, { status: 400 }),
+    })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const draft = await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({}) as FeedbackDraft
+    const result = await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: draft.draftId, description: "synthetic" })
+    const valid = sectionId !== undefined && sectionId !== "unknown"
+    expect(result).toEqual({ kind: "refused", reason: "secret-detected", ...(valid ? { sectionId } : {}) })
+  })
+
   test("#given no usable OS credential store #when /bug sends #then anonymous reporting remains available", async () => {
     const { pi, api, component, requests } = host({ withRedactor: true, credentialStore: {
       read: async () => { throw new KeychainLockedError("locked") },
