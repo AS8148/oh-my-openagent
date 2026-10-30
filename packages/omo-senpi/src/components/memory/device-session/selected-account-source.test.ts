@@ -119,6 +119,23 @@ describe("session Workers in a shared-worker engine", () => {
     expect(result.reports).toEqual([{ source: "desktop", cliBuilt: false }])
   }, 30_000)
 
+  test("an attachment that connects after the deadline is closed, and the unavailable answer stands", async () => {
+    const result = await engine("late-connected") as unknown as { claims: number; answer: string; closed: string; opened: boolean; source: string }
+    expect(result.claims).toBe(1)
+    expect(result.answer).toBe("unavailable:private_channel_unavailable")
+    expect(result.closed).toBe("closed")
+    expect(result.opened).toBe(false)
+    expect(result.source).toBe("unavailable:private_channel_unavailable")
+  }, 30_000)
+
+  test("the selection is memoized per process: a second call returns the first and claims nothing again", async () => {
+    const result = await engine("memoized") as unknown as { claims: number; same: boolean; first: string; second: string }
+    expect(result.same).toBe(true)
+    expect(result.claims).toBe(1)
+    expect(result.second).toBe(result.first)
+    expect(result.first).toBe("desktop")
+  }, 30_000)
+
   test("an undeclared launch: Workers get the CLI selection and nothing is claimed", async () => {
     const result = await engine("cli")
     expect(result.claims).toBe(0)

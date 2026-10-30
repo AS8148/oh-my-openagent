@@ -120,6 +120,46 @@ describe("authoritative credential reads under the shared lock", () => {
     }, 30_000)
   }
 
+  for (const rotated of ["signingPrivateKey", "sealingPrivateKey"] as const) {
+    test(`#given a captured CLI account #when another store rotates the ${rotated === "signingPrivateKey" ? "signing" : "sealing"} key #then signing, a service mutation and the pin rename are all refused`, async () => {
+      const f = await fixture()
+      await f.store.write(credential("device-a"))
+      const served: string[] = []
+      const account = await createCliAccountSource({ api: ORIGIN, store: f.store, home: f.home, fetch: identity("account-a", () => "device-a", served) })()
+      if (account === null) throw new Error("the fixture account did not resolve")
+      let rawSigns = 0
+      const keyring = await account.keyring(async material => {
+        const raw = await deviceKeyringFromMaterial(material)
+        return { ...raw, sign: request => { rawSigns += 1; return raw.sign(request) } } satisfies DeviceKeyring
+      })
+      const operation = await account.forOperation({ signal: new AbortController().signal, admit: effect => effect() })
+      const pinFrom = join(f.home, "pin.tmp")
+      const pinTo = join(f.home, "pin")
+      await writeFile(pinFrom, "pin")
+      // Another process's store rotates exactly one key; the store stamps the new generation itself.
+      const other = createCredentialStore(ORIGIN, { platform: "darwin", home: f.home, lockProbe: async () => "unlocked", secrets: {
+        get: async () => readFile(f.secretFile, "utf8").catch(() => null),
+        set: async ({ value }) => { await writeFile(`${f.secretFile}.tmp`, value); await rename(`${f.secretFile}.tmp`, f.secretFile) },
+        delete: async () => { await rm(f.secretFile, { force: true }); return true },
+      } })
+      const stored = await other.readAuthoritative()
+      if (stored === null) throw new Error("missing stored credential")
+      await other.write({ ...stored, [rotated]: keys()[rotated] })
+
+      const outcomes = await Promise.all([
+        keyring.sign({ purpose: "object-digest", digest: new Uint8Array(32) }).then(() => "admitted", () => "refused"),
+        operation.pairing.setAccountSync(true).then(() => "admitted", () => "refused"),
+        account.boundary(() => renameSync(pinFrom, pinTo)).then(() => "admitted", () => "refused"),
+      ])
+      expect(outcomes).toEqual(["refused", "refused", "refused"])
+      expect(rawSigns).toBe(0)
+      expect(served).toEqual([])
+      expect(existsSync(pinTo)).toBe(false)
+      expect(account.signal.aborted).toBe(true)
+      await operation.close()
+    }, 30_000)
+  }
+
   test("#given no writer #when the same operations run #then each is admitted (same-identity control)", async () => {
     const f = await fixture()
     await f.store.write(credential("device-a"))

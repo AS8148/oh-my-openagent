@@ -10,7 +10,7 @@ import {
 
 // An engine process in miniature, wired the way senpi provideSessionWorkerData hands each session Worker its value:
 // the main thread selects once; each Worker gets workerData.extensionData[name] plus its transfers; dispose on exit.
-// Usage: bun hostSelection.fixture.ts <desktop|declared-null|unparseable|cli|no-port|throwing|malformed|late|hang|in-process>
+// Usage: bun hostSelection.fixture.ts <desktop|declared-null|unparseable|cli|no-port|throwing|malformed|late|hang|in-process|late-connected|memoized>
 
 type Report = {
   readonly source: string
@@ -70,17 +70,40 @@ async function inMain(scenario: string): Promise<void> {
   const attachGate = new Promise<void>(resolve => { releaseAttach = resolve })
   const host = scenario === "no-port" || scenario === "malformed" ? undefined : selectHostMemorySyncSource({
     inherited: {
-      declared: name => { if (scenario === "throwing") throw new Error("stub failure"); return name === "memory-sync" && ["desktop", "declared-null", "late", "hang", "in-process"].includes(scenario) },
+      declared: name => { if (scenario === "throwing") throw new Error("stub failure"); return name === "memory-sync" && ["desktop", "declared-null", "late", "hang", "in-process", "late-connected", "memoized"].includes(scenario) },
       tablePresent: () => scenario !== "cli",
-      take: name => { claims += 1; return ["desktop", "late", "hang", "in-process"].includes(scenario) && name === "memory-sync" ? new PassThrough() : undefined },
+      take: name => { claims += 1; return ["desktop", "late", "hang", "in-process", "late-connected", "memoized"].includes(scenario) && name === "memory-sync" ? new PassThrough() : undefined },
     },
-    ...(scenario === "hang" ? { attachDeadlineMs: 500 } : {}),
+    ...(scenario === "hang" ? { attachDeadlineMs: 500 } : scenario === "late-connected" ? { attachDeadlineMs: 200 } : {}),
     attach: async (stream): Promise<DesktopSyncAttachment> => {
-      if (scenario === "late") await attachGate
+      if (scenario === "late" || scenario === "late-connected") await attachGate
       if (scenario === "hang") await new Promise(() => {})
       return stream === undefined ? { kind: "unavailable", reason: "private_channel_unavailable" } : { kind: "connected", channel }
     },
   })
+  if (scenario === "late-connected" && host !== undefined) {
+    // The attachment connects only AFTER the deadline answered: the late channel must be closed, the answer kept.
+    const settled = await host.selection
+    const closed = new Promise<"closed">(resolve => lifetime.signal.addEventListener("abort", () => resolve("closed"), { once: true }))
+    releaseAttach()
+    const closedBy = await Promise.race([closed, new Promise<"not-closed">(resolve => setTimeout(() => resolve("not-closed"), 5_000))])
+    let opened = false
+    const account = await accountSourceFromSelection({ selection: () => host.selection, cli: () => async () => null, openAccount: async () => { opened = true; return { kind: "desktop", isCurrent: async () => true } as unknown as DesktopSyncAccount } })()
+    const answer = settled.kind === "unavailable" ? `unavailable:${settled.reason}` : settled.kind
+    process.stdout.write(`${JSON.stringify({ scenario, claims, ends, answer, closed: closedBy, opened, source: account?.kind === "unavailable" ? `unavailable:${account.reason}` : account?.kind ?? "null" })}\n`)
+    process.exit(0)
+  }
+  if (scenario === "memoized" && host !== undefined) {
+    // A second selection in the same process returns the first one and claims nothing again.
+    const again = selectHostMemorySyncSource({
+      inherited: { declared: () => { throw new Error("a second selection must not classify again") }, tablePresent: () => true, take: () => { claims += 1; return undefined } },
+      attach: async () => ({ kind: "unavailable", reason: "private_channel_unavailable" }),
+    })
+    const first = await host.selection
+    const second = await again.selection
+    process.stdout.write(`${JSON.stringify({ scenario, claims, ends, same: again === host, first: first.kind, second: second.kind })}\n`)
+    process.exit(0)
+  }
   if (scenario === "in-process" && host !== undefined) {
     // An in-process host: memory registers on the main thread itself and reads the host selection directly.
     let cliBuilt = false

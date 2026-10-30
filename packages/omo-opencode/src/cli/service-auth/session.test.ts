@@ -1,6 +1,78 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, onTestFinished, spyOn, test } from "bun:test"
+import * as credentialLock from "./credential-lock"
+import { CredentialIdentityChanged, type CredentialStore } from "./keystore"
+import type { Credentials } from "./protocol"
 import { createSession, SessionEnded } from "./session"
 import { fakeApi, grant, memorySecrets, privateKeys, refusal, temporaryHome } from "./test-support"
+
+const NOW = Date.parse("2030-01-01T00:00:00Z")
+const captured: Credentials = { ...grant, ...privateKeys, accountId: "account-a", credentialGeneration: "generation-a" }
+const sameIdentity = (current: Credentials) => current.accountId === captured.accountId
+  && current.credentialGeneration === captured.credentialGeneration
+  && current.device.id === captured.device.id
+  && current.signingPrivateKey === captured.signingPrivateKey
+  && current.sealingPrivateKey === captured.sealingPrivateKey
+
+async function tokenHarness(snapshot: Credentials, authoritative = snapshot) {
+  let current: Credentials | null = authoritative
+  const bodies: unknown[] = []
+  const refresh = mock(async (request: Request) => {
+    bodies.push(await request.json())
+    return Response.json({ ...grant, accessToken: "refreshed-access" })
+  })
+  const api = fakeApi(refresh)
+  const store = {
+    read: mock(async () => snapshot),
+    readAuthoritative: mock(async () => current),
+    write: mock(async (value: Credentials) => { current = value }),
+    clear: mock(async () => { current = null }),
+  } satisfies CredentialStore
+  const lock = spyOn(credentialLock, "withCredentialLock")
+  onTestFinished(() => lock.mockRestore())
+  const session = createSession({ api, store, home: await temporaryHome(), now: () => NOW })
+  return { session, store, lock, refresh, bodies }
+}
+
+describe("access token identity and refresh paths", () => {
+  test("valid same-identity snapshot returns without locking or refreshing", async () => {
+    const h = await tokenHarness({ ...captured, accessTokenExpiresAt: new Date(NOW + 30_001).toISOString() })
+    expect(await h.session.accessToken(sameIdentity)).toBe(captured.accessToken)
+    expect(h.lock).not.toHaveBeenCalled()
+    expect(h.store.readAuthoritative).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+  })
+
+  for (const remaining of [-1, 30_000]) {
+    test(`token with ${remaining}ms remaining locks, reads authoritatively and refreshes`, async () => {
+      const stale = { ...captured, accessTokenExpiresAt: new Date(NOW + remaining).toISOString() }
+      const h = await tokenHarness(stale, { ...stale, refreshToken: "authoritative-refresh" })
+      expect(await h.session.accessToken(sameIdentity)).toBe("refreshed-access")
+      expect(h.lock).toHaveBeenCalledTimes(1)
+      expect(h.store.readAuthoritative).toHaveBeenCalledTimes(1)
+      expect(h.refresh).toHaveBeenCalledTimes(1)
+      expect(h.bodies).toEqual([{ refreshToken: "authoritative-refresh" }])
+    })
+  }
+
+  test("identity change on authoritative refresh rejects before dispatch", async () => {
+    const stale = { ...captured, accessTokenExpiresAt: new Date(NOW).toISOString() }
+    const h = await tokenHarness(stale, { ...stale, credentialGeneration: "generation-b" })
+    await expect(h.session.accessToken(sameIdentity)).rejects.toBeInstanceOf(CredentialIdentityChanged)
+    expect(h.lock).toHaveBeenCalledTimes(1)
+    expect(h.store.readAuthoritative).toHaveBeenCalledTimes(1)
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(h.store.write).not.toHaveBeenCalled()
+  })
+
+  test("valid snapshot with different identity cannot bypass authoritative guard", async () => {
+    const other = { ...captured, accountId: "account-b" }
+    const h = await tokenHarness(other)
+    await expect(h.session.accessToken(sameIdentity)).rejects.toBeInstanceOf(CredentialIdentityChanged)
+    expect(h.lock).toHaveBeenCalledTimes(1)
+    expect(h.store.readAuthoritative).toHaveBeenCalledTimes(1)
+    expect(h.refresh).not.toHaveBeenCalled()
+  })
+})
 
 describe("credential lifecycle", () => {
   test("rotates once for concurrent requests and awaits durable replacement before returning access", async () => {
