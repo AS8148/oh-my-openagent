@@ -1,4 +1,4 @@
-import { readFile, rename, rm, writeFile } from "node:fs/promises"
+import { readFile, rename, rm, writeFile } from "@oh-my-opencode/memory-core/fs"
 import { createCredentialStore, type Credentials } from "@oh-my-opencode/omo-opencode/service-auth"
 
 // A credential writer in its own process: it takes the real per-origin lock under `home` and commits B, then A again.
