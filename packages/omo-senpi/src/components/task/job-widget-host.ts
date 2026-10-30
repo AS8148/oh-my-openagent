@@ -67,8 +67,20 @@ export interface JobWidgetHostApi {
 
 type TextTapConstructor = new (id: string, label: string) => JobWidgetTextTap
 
+// One host object per loaded module, so per-host state (the author route) is shared by every session
+// on the same senpi and never by two different hosts.
+const hostsByModule = new WeakMap<object, JobWidgetHostApi>()
+
 export function readJobWidgetHost(module: unknown): JobWidgetHostApi {
   if (typeof module !== "object" || module === null) return {}
+  const cached = hostsByModule.get(module)
+  if (cached !== undefined) return cached
+  const host = buildJobWidgetHost(module)
+  hostsByModule.set(module, host)
+  return host
+}
+
+function buildJobWidgetHost(module: object): JobWidgetHostApi {
   const setAuthorResolver: unknown = Reflect.get(module, "setJobWidgetAuthorResolver")
   const register: unknown = Reflect.get(module, "registerJobWidgetSource")
   const textTap: unknown = Reflect.get(module, "TextTap")
