@@ -13,7 +13,8 @@ use senpi_desktop_core::backend::PointerEvent;
 use senpi_desktop_core::error::{CoreResult, DesktopError};
 
 use super::cgevent::{
-    button_types, click_group_id, is_press, modifier_flags, mouse_event, point, quartz_wheel, scroll_event,
+    button_types, click_group_id, is_press, modifier_flags, mouse_event, point, quartz_wheel,
+    scroll_event,
 };
 use super::held::{ButtonRoute, Held, HeldButton};
 
