@@ -85,11 +85,13 @@ export function reminderKindFor(
  *   clear/re-trigger cycle).
  * - conflict: `conflict:<state>` (merge vs rebase vs unmerged differ).
  * - push_failed: `push_failed:<reason>` (a new reason is a new condition).
+ * - clean: null (clears any active condition).
  */
 function conditionKeyFor(
   snapshot: RepoStatusSnapshot,
-  kind: ReminderKind,
-): string {
+  kind: ReminderKind | null,
+): string | null {
+  if (kind === null) return null;
   switch (kind) {
     case "dirty":
       return "dirty";
@@ -191,6 +193,7 @@ export function generateReminders(
   snapshot: RepoStatusSnapshot,
 ): readonly Reminder[] {
   const kind = reminderKindFor(snapshot);
+  const key = conditionKeyFor(snapshot, kind);
 
   // Clean snapshot: clear the active condition so the next trigger emits.
   if (kind === null) {
@@ -198,13 +201,13 @@ export function generateReminders(
     return [];
   }
 
-  const key = conditionKeyFor(snapshot, kind);
   // Same condition already emitted: suppress.
   if (state.emittedKey === key) {
     return [];
   }
 
   // New or re-triggered condition: emit and record.
+  // kind is non-null here because kind === null returned above.
   state.emittedKey = key;
   const text = renderReminder(snapshot, kind);
   return [{ kind, text }];
