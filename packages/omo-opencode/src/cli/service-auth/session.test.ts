@@ -1,6 +1,6 @@
 import { describe, expect, mock, onTestFinished, spyOn, test } from "bun:test"
 import * as credentialLock from "./credential-lock"
-import { CredentialIdentityChanged, type CredentialStore } from "./keystore"
+import { createCredentialStore, CredentialIdentityChanged, type CredentialStore, InvalidCredentialState } from "./keystore"
 import type { Credentials } from "./protocol"
 import { createSession, SessionEnded } from "./session"
 import { fakeApi, grant, memorySecrets, privateKeys, refusal, temporaryHome } from "./test-support"
@@ -75,6 +75,48 @@ describe("access token identity and refresh paths", () => {
 })
 
 describe("credential lifecycle", () => {
+  test("accessToken surfaces corrupt-credential recovery without locking or changing storage", async () => {
+    const store = createCredentialStore("https://api.omo.dev", { platform: "darwin", secrets: {
+      get: async () => "{",
+      set: async () => { throw new Error("unexpected write") },
+      delete: async () => { throw new Error("unexpected delete") },
+    } })
+    const lock = spyOn(credentialLock, "withCredentialLock")
+    onTestFinished(() => lock.mockRestore())
+    const session = createSession({ api: "https://api.omo.dev", store, home: await temporaryHome() })
+    const error = await session.accessToken(sameIdentity).catch(error => error)
+    expect(error).toBeInstanceOf(InvalidCredentialState)
+    expect(error.message).toBe("The OmO sign-in saved on this computer can't be read. Run omo account forget to remove it, then sign in again in the desktop app.")
+    expect(lock).not.toHaveBeenCalled()
+  })
+
+  test("scoped update refuses corrupt ownership and clears only its own readable scope afterward", async () => {
+    const secrets = memorySecrets()
+    const api = "https://api.omo.dev"
+    const store = secrets.store(api)
+    const other = secrets.store("https://other.example")
+    await store.write(captured)
+    await other.write({ ...captured, device: { ...captured.device, id: "other-device" } })
+    const otherBefore = await other.read()
+    const slot = [...secrets.values.keys()].find(key => JSON.parse(secrets.values.get(key)!).device.id === captured.device.id)!
+    secrets.values.set(slot, "{")
+    const session = createSession({ api, store, home: await temporaryHome() })
+    let actions = 0
+    const forgetCaptured = () => session.update(async current => {
+      actions++
+      if (current?.device.id !== captured.device.id) return false
+      await store.clear()
+      return true
+    })
+    await expect(forgetCaptured()).rejects.toBeInstanceOf(InvalidCredentialState)
+    expect(actions).toBe(0)
+    expect(secrets.values.get(slot)).toBe("{")
+    await store.write(captured)
+    expect(await forgetCaptured()).toBe(true)
+    expect(await store.read()).toBeNull()
+    expect(await other.read()).toEqual(otherBefore)
+  })
+
   test("rotates once for concurrent requests and awaits durable replacement before returning access", async () => {
     const secrets = memorySecrets()
     const stored = Promise.withResolvers<void>()

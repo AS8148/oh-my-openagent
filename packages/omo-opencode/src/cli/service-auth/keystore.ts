@@ -218,8 +218,8 @@ export function createSealedStore<T>(
       return schema.parse(JSON.parse(value))
     } catch {
       throw new InvalidCredentialState(signInRoute() === "cli"
-        ? "Stored sign-in data is invalid. Run omo logout, then omo login."
-        : "The OmO sign-in saved on this computer can't be read, and it can't be reset from the terminal yet.")
+        ? "Stored sign-in data is invalid. Run omo account forget, then omo login."
+        : "The OmO sign-in saved on this computer can't be read. Run omo account forget to remove it, then sign in again in the desktop app.")
     }
   }
   return {
