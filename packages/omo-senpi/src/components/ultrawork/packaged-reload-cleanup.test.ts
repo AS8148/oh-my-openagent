@@ -150,7 +150,9 @@ describe("cleanUpReloadRun", () => {
     }), 5_000)
 
     // then
-    expect((outcome.error as Error | undefined)?.message).toBe("supervisor did not finish graceful shutdown within 200ms")
+    // Windows has no catchable SIGTERM: kill() terminates the child at once, so no grace overrun is reported there.
+    const graceError = process.platform === "win32" ? undefined : "supervisor did not finish graceful shutdown within 200ms"
+    expect((outcome.error as Error | undefined)?.message).toBe(graceError)
     expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
     expect(() => process.kill(child.pid ?? -1, 0)).toThrow()
     expect(existsSync(root)).toBe(false)
