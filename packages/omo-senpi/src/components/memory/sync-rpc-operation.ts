@@ -13,8 +13,11 @@ export function serviceProblem(error: unknown): SyncRpcProblem {
 
 export class RetiredSyncOperation extends Error {}
 
+/** A record that runs a ceremony and takes a claim; a "read" record never does. */
+export type CeremonyOperation = Operation & { readonly kind: "enable" | "approve" }
+
 export interface Operation {
-  readonly kind: "enable" | "approve"
+  readonly kind: "enable" | "approve" | "read"
   readonly owner: SyncRpcContext
   readonly controller: AbortController
   readonly ready: PromiseWithResolvers<void>
@@ -41,7 +44,7 @@ export function identityOf(account: SyncRpcAccount): string {
 }
 
 export async function runSyncRpcOperation(
-  record: Operation,
+  record: CeremonyOperation,
   options: SyncRpcOptions,
   deps: {
     readonly current: (owner: SyncRpcContext) => Promise<SyncRpcAccount>
