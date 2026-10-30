@@ -98,7 +98,8 @@ describe("credential lifecycle", () => {
     await store.write(captured)
     await other.write({ ...captured, device: { ...captured.device, id: "other-device" } })
     const otherBefore = await other.read()
-    const slot = [...secrets.values.keys()].find(key => JSON.parse(secrets.values.get(key)!).device.id === captured.device.id)!
+    const slot = [...secrets.values.keys()].find(key => JSON.parse(secrets.values.get(key) ?? "{}").device?.id === captured.device.id)
+    if (slot === undefined) throw new Error("the captured account was not stored")
     secrets.values.set(slot, "{")
     const session = createSession({ api, store, home: await temporaryHome() })
     let actions = 0

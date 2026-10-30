@@ -105,7 +105,7 @@ describe("omo account", () => {
     expect(result.code).toBe(replace ? ACCOUNT_EXIT.ok : ACCOUNT_EXIT.failed)
     expect(calls).toEqual(replace ? ["get", "get", "set"] : ["get"])
     if (replace) {
-      expect(JSON.parse(value!)).toEqual({ ...incoming, credentialGeneration: expect.any(String) })
+      expect(JSON.parse(value ?? "null")).toEqual({ ...incoming, credentialGeneration: expect.any(String) })
     } else {
       expect(value).toBe("{")
     }
