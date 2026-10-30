@@ -3,7 +3,7 @@ import { resolveCategory, type SenpiModelPort, type SenpiModelRegistryPort } fro
 
 import type { JobWidgetAuthorContext, JobWidgetHostApi } from "./job-widget-host"
 
-export const JOB_WIDGET_AUTHOR_CATEGORY = "quick"
+const JOB_WIDGET_AUTHOR_CATEGORY = "quick"
 
 export function resolveJobWidgetAuthorModel(
   omoConfig: OmoConfig,

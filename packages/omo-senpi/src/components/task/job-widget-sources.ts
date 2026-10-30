@@ -9,7 +9,7 @@ import type { StoreMutation } from "./store-mutation-observer"
 // subagent tool calls arrive on, each opened by the engine's marker line `» <tool> <intent>`.
 export const TASK_TOOLS_SOURCE_ID = "tools"
 export const TASK_TOOL_CALL_MARK = "» "
-export const TASK_TOOLS_SOURCE_LABEL = `subagent tool calls: \`${TASK_TOOL_CALL_MARK}<tool> <intent>\` (omo's marker) then the result text`
+const TASK_TOOLS_SOURCE_LABEL = `subagent tool calls: \`${TASK_TOOL_CALL_MARK}<tool> <intent>\` (omo's marker) then the result text`
 const MAX_TOOL_RESULT_CHARS = 64 * 1024
 const MAX_ASSIGNMENT_CHARS = 4 * 1024
 const MAX_WATCH_COMMAND_CHARS = 300
@@ -186,12 +186,12 @@ function redactCommandSecrets(text: string): string {
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/g, "[REDACTED]")
 }
 
-export function formatToolCallEntry(toolName: string, args: unknown, resultText: string): string {
+function formatToolCallEntry(toolName: string, args: unknown, resultText: string): string {
   const text = resultText.length > MAX_TOOL_RESULT_CHARS ? resultText.slice(-MAX_TOOL_RESULT_CHARS) : resultText
   return `\n${TASK_TOOL_CALL_MARK}${formatToolActivity(toolName, args)}\n${text}\n`
 }
 
-export function toolResultText(result: unknown): string {
+function toolResultText(result: unknown): string {
   if (typeof result === "string") return result
   if (typeof result !== "object" || result === null) return ""
   const content: unknown = Reflect.get(result, "content")
