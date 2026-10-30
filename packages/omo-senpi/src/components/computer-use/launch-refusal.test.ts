@@ -96,9 +96,9 @@ test("the registered /computer on command reports recovery without a permission 
 }, 10_000)
 
 for (const [diagnostic, message] of [
-  ["native-unavailable", "Computer use is unavailable: no desktop engine is installed for this host."],
+  ["native-unavailable", "Computer use is unavailable: no usable desktop engine was found for this host."],
   ["quarantined", "Computer use is unavailable: macOS Gatekeeper has quarantined the desktop engine."],
-  ["abi-mismatch", "Computer use is unavailable: the installed desktop engine does not match this omo version."],
+  ["abi-mismatch", "Computer use is unavailable: the installed desktop engine does not match this omo release."],
 ] as const) {
   test(`an unavailable engine (${diagnostic}) carries a user-facing message without the engine path`, () => {
     const error = new ComputerEngineUnavailableError(diagnostic, new Error("/opt/engine/senpi-desktop-engine: missing"))

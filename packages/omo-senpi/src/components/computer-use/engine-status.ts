@@ -27,9 +27,9 @@ export interface TrackedDesktopServiceOptions extends DesktopServiceOptions {
 }
 
 const UNAVAILABLE_MESSAGE: Readonly<Record<EngineDiagnostic, string>> = {
-  "native-unavailable": "Computer use is unavailable: no desktop engine is installed for this host.",
+  "native-unavailable": "Computer use is unavailable: no usable desktop engine was found for this host.",
   quarantined: "Computer use is unavailable: macOS Gatekeeper has quarantined the desktop engine.",
-  "abi-mismatch": "Computer use is unavailable: the installed desktop engine does not match this omo version.",
+  "abi-mismatch": "Computer use is unavailable: the installed desktop engine does not match this omo release.",
   "launch-context-unavailable": "Computer use cannot start safely from this host's current macOS launch context.",
 }
 
