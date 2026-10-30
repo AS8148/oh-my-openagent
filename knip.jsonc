@@ -1111,8 +1111,6 @@
       "packages/omo-senpi/src/components/comment-checker/failure-notice.ts": ["commentCheckerFailureNotice"],
       // pre-existing at origin dev 4686e425b5: unused export(s) downloadSenpiCommentCheckerBinary, defaultCommentCheckerCacheDir
       "packages/omo-senpi/src/components/comment-checker/index.ts": ["downloadSenpiCommentCheckerBinary", "defaultCommentCheckerCacheDir"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) ComputerEngineUnavailableError
-      "packages/omo-senpi/src/components/computer-use/engine-status.ts": ["ComputerEngineUnavailableError"],
       // pre-existing at origin dev 4686e425b5: unused export(s) COMPUTER_USE_COMPONENT_NAME
       "packages/omo-senpi/src/components/computer-use/index.ts": ["COMPUTER_USE_COMPONENT_NAME"],
       // pre-existing at origin dev 4686e425b5: unused export(s) toComputerSettingsInput
