@@ -13,8 +13,11 @@ export function serviceProblem(error: unknown): SyncRpcProblem {
 
 export class RetiredSyncOperation extends Error {}
 
+/** A record that runs a ceremony and takes a claim; a "read" record never does. */
+export type CeremonyOperation = Operation & { readonly kind: "enable" | "approve" }
+
 export interface Operation {
-  readonly kind: "enable" | "approve"
+  readonly kind: "enable" | "approve" | "read"
   readonly owner: SyncRpcContext
   readonly controller: AbortController
   readonly ready: PromiseWithResolvers<void>
@@ -37,11 +40,11 @@ export interface Operation {
 
 export function identityOf(account: SyncRpcAccount): string {
   const d = account.descriptor
-  return JSON.stringify([d.serviceOrigin, d.accountId, d.serviceDeviceId, d.syncPrincipalId, d.publicKeys.signing, d.publicKeys.sealing, d.generation])
+  return JSON.stringify([d.serviceOrigin, d.accountId, d.serviceDeviceId, d.syncPrincipalId, d.publicKeys.signing, d.publicKeys.sealing, d.generation, d.incarnation])
 }
 
 export async function runSyncRpcOperation(
-  record: Operation,
+  record: CeremonyOperation,
   options: SyncRpcOptions,
   deps: {
     readonly current: (owner: SyncRpcContext) => Promise<SyncRpcAccount>
@@ -83,6 +86,7 @@ export async function runSyncRpcOperation(
       serviceOrigin: captured.serviceOrigin,
       ...(captured.genesis === "supported" && captured.rpId !== null && captured.userName !== null
         ? { rpId: captured.rpId, userName: captured.userName } : {}),
+      ...(captured.genesis === "supported" && ports.genesis !== undefined ? { genesis: ports.genesis } : {}),
       keyring: ports.keyring, chain: ports.chain, pairing: ports.pairing,
       pinDir: options.pinDir, authority: auth, signal: auth.signal,
     }

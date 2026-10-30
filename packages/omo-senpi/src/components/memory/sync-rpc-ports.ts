@@ -42,6 +42,7 @@ export interface SyncRpcRuntime {
     readonly serviceOrigin: string
     readonly rpId?: string
     readonly userName?: string
+    readonly genesis?: DesktopSyncOperation["genesis"]
   }): Promise<EnableOutcome & { readonly created?: true }>
   joinAccount(input: SyncRpcCeremonyInput & {
     readonly clock: CeremonyClock

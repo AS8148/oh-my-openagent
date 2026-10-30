@@ -16,9 +16,8 @@ afterEach(async () => {
 })
 const identity: SyncRpcIdentity = {
   genesis: "unsupported", rpId: null, userName: null,
-  incarnation: "test-incarnation",
   serviceOrigin: "https://service.invalid", accountId: "account", serviceDeviceId: "device",
-  syncPrincipalId: "principal", publicKeys: { signing: "public-signing", sealing: "public-sealing" }, generation: "g",
+  syncPrincipalId: "principal", publicKeys: { signing: "public-signing", sealing: "public-sealing" }, generation: "g", incarnation: "main-1",
 }
 function authority(): SyncRpcAuthority {
   return { signal: new AbortController().signal, admit: (effect) => effect(), boundary: async (effect) => effect() }

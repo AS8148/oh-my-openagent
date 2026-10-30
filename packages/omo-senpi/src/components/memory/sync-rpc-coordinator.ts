@@ -1,6 +1,6 @@
 import type { ApprovalProgress, SyncApproveRequest, SyncApproveResponse, SyncEnableResponse, SyncRpcProblem, SyncStatusResponse } from "./sync-rpc-contract"
 import type { SyncRpcAccount, SyncRpcAuthority, SyncRpcContext, SyncRpcOperation, SyncRpcOptions } from "./sync-rpc-ports"
-import { identityOf, refused, RetiredSyncOperation, runSyncRpcOperation, serviceProblem, unavailable, type Operation } from "./sync-rpc-operation"
+import { identityOf, refused, RetiredSyncOperation, runSyncRpcOperation, serviceProblem, unavailable, type CeremonyOperation, type Operation } from "./sync-rpc-operation"
 
 export function createSyncRpcCoordinator(options: SyncRpcOptions) {
   let lifetime = new AbortController()
@@ -57,8 +57,8 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
       return account.boundary(() => authority(record).admit(dispatch))
     },
   })
-  const newRecord = (owner: SyncRpcContext, kind: Operation["kind"], pendingId?: string): Operation => {
-    const record: Operation = {
+  const newRecord = <K extends Operation["kind"]>(owner: SyncRpcContext, kind: K, pendingId?: string): Operation & { readonly kind: K } => {
+    const record: Operation & { readonly kind: K } = {
       kind, owner, pendingId, controller: new AbortController(),
       ready: Promise.withResolvers<void>(), confirmation: Promise.withResolvers<boolean>(),
       disposeListeners: [], account: undefined, identity: undefined, active: true,
@@ -79,11 +79,14 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
     : { pendingId: record.pendingId ?? "", expiresAt: record.expiresAt, code: record.code, outcome: record.approval }
   const readEnable = (record: Operation): SyncEnableResponse => record.enable ?? unavailable()
 
-  const start = (record: Operation): void => {
+  const start = (record: CeremonyOperation): void => {
     operations.add(record)
     record.done = runSyncRpcOperation(record, options, { current, authority, subscribe, cancel })
       .finally(() => operations.delete(record))
   }
+  // Only ownerId is compared here. A reconnect that reuses an ownerId is a new connection incarnation, and it is
+  // fenced indirectly: the old connection's disconnect aborts the record's controller (so the check below fails),
+  // and identityOf keys every operation by the account descriptor's incarnation.
   const ensureOwned = (record: Operation, owner: SyncRpcContext): boolean => record.owner.ownerId === owner.ownerId
     && (!record.controller.signal.aborted || record.expired)
   const currentRecord = async (record: Operation, owner: SyncRpcContext): Promise<boolean> => {
@@ -161,7 +164,7 @@ export function createSyncRpcCoordinator(options: SyncRpcOptions) {
       } catch { return unavailable() }
     },
     async read<T>(owner: SyncRpcContext, use: (ports: SyncRpcOperation) => Promise<T>): Promise<T | SyncRpcProblem> {
-      const record = newRecord(owner, "enable")
+      const record = newRecord(owner, "read")
       const task = (async () => {
         let ports: SyncRpcOperation | undefined
         try {
