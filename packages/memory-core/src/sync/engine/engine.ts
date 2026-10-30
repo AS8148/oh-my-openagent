@@ -145,7 +145,12 @@ export class SyncEngine {
         this.failing = failing
         // A failure below its threshold (an offline blip) never replaces or clears what is shown: only a
         // successful cycle clears a shown failure.
-        if (isFailureShown(failing.failure.kind, failing.attempts)) this.shown = failing
+        if (isFailureShown(failing.failure.kind, failing.attempts)) {
+          const shown = this.shown
+          this.shown = shown !== null && shownBefore === `${failure.kind}\n${failure.action}`
+            ? { failure, since: shown.since, attempts: shown.attempts + 1 }
+            : failing
+        }
         this.announceIfChanged(shownBefore)
         for (const w of waiters) w.reject(error)
         if (this.running === run) this.running = null
