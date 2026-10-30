@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { classifyReflectionLockHolder, isLocalHost } from "./stale-holder"
+import { classifyReflectionLockHolder, getStableLocalHostId, isLocalHost } from "./stale-holder"
 import { REFLECTION_DIR, SCENARIOS, probeFor } from "./stale-holder.scenarios.test-support"
 
 describe("reflection lock holder decision (#10377)", () => {
@@ -137,6 +137,65 @@ describe("reflection lock holder decision (#10377)", () => {
         runId: "reflection-run-64",
         reason: "it is owned by host their-mac, which cannot be checked from here",
       })
+    })
+
+    // An id lookup that fails or times out answers `null`. Treating that as "another host" would
+    // leave the machine unable to reclaim its own lock, so the hostname rule has to decide.
+    test("#given a recorded id and an unknown current id #when the hostnames match #then it is still this host", () => {
+      expect(
+        isLocalHost(
+          { hostname: "MacBook-Pro", hostId: "our-machine" },
+          { hostname: "MacBook-Pro", hostId: null },
+        ),
+      ).toBe(true)
+      expect(
+        isLocalHost(
+          { hostname: "MacBook-Pro", hostId: "our-machine" },
+          { hostname: "MacBook-Pro", hostId: undefined },
+        ),
+      ).toBe(true)
+    })
+
+    test("#given a recorded id and an unknown current id #when the hostnames differ #then it stays foreign", () => {
+      expect(
+        isLocalHost(
+          { hostname: "Mac-765", hostId: "our-machine" },
+          { hostname: "Mac-424", hostId: null },
+        ),
+      ).toBe(false)
+    })
+
+    test("#given a recorded id and an unknown current id #when classified #then the lock is reclaimed here", async () => {
+      const baseScenario = SCENARIOS.find((s) => s.rule === undefined)
+      if (!baseScenario) throw new Error("missing base scenario")
+      const facts = {
+        ...baseScenario.facts,
+        files: {
+          ...baseScenario.facts.files,
+          [`${REFLECTION_DIR}/active.lock`]: JSON.stringify({
+            runId: "reflection-run-64",
+            launcherPid: 11096,
+            launcherHostname: "MacBook-Pro",
+            launcherHostId: "our-machine",
+          }),
+        },
+      }
+      const probe = { ...probeFor(facts), hostname: () => "MacBook-Pro", hostId: () => null }
+      expect(await classifyReflectionLockHolder(REFLECTION_DIR, probe)).toEqual({
+        state: "dead",
+        runId: "reflection-run-64",
+      })
+    })
+
+    // The id has to identify the machine, not the network link. A value therefore names the probe
+    // that produced it, and a platform with no probe answers null rather than a bare hostname.
+    test("#given this platform #when the machine id is resolved #then it is namespaced or absent", async () => {
+      const id = await getStableLocalHostId()
+      if (process.platform !== "darwin") {
+        expect(id).toBeNull()
+        return
+      }
+      expect(id).toMatch(/^darwin-uuid:[0-9A-Fa-f-]{36}$/)
     })
   })
 })

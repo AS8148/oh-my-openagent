@@ -75,17 +75,15 @@ function isRunOutcome(value: unknown, runId: string): boolean {
     && typeof fields.timedOut === "boolean"
 }
 
-let cachedLocalHostId: Promise<string | null> | undefined
+export interface HostIdentity {
+  readonly hostname: string
+  readonly hostId?: string | null
+}
 
-/**
- * Reads the Bonjour local host name, which macOS keeps across DHCP leases while
- * `os.hostname()` follows the network's reverse-DNS name.
- */
-async function readDarwinLocalHostName(): Promise<string | null> {
+/** Trimmed stdout of a short-lived probe, or `null` when it fails or times out. */
+async function readCommandOutput(command: string, args: readonly string[], timeoutMs: number): Promise<string | null> {
   return await new Promise((resolve) => {
-    // `scutil` answers in milliseconds, but the spawn must never hold the event loop: every
-    // session turn and `/doctor` call reaches this path.
-    execFile("scutil", ["--get", "LocalHostName"], { encoding: "utf8", timeout: 500, windowsHide: true }, (error, stdout) => {
+    execFile(command, args, { encoding: "utf8", timeout: timeoutMs, windowsHide: true }, (error, stdout) => {
       if (error !== null) {
         resolve(null)
         return
@@ -96,28 +94,57 @@ async function readDarwinLocalHostName(): Promise<string | null> {
   })
 }
 
-/**
- * Stable per-machine identity, resolved once per process (single flight, so concurrent callers
- * share one spawn). Non-macOS platforms report `null` and fall back to the hostname rule.
- */
-export function getStableLocalHostId(): Promise<string | null> {
-  cachedLocalHostId ??= process.platform === "darwin" ? readDarwinLocalHostName() : Promise.resolve(null)
-  return cachedLocalHostId
+/** Extracts the firmware UUID from `ioreg -c IOPlatformExpertDevice` output. */
+export function parsePlatformUuid(ioreg: string | null): string | null {
+  if (ioreg === null) return null
+  const uuid = /"IOPlatformUUID"\s*=\s*"([^"]*)"/.exec(ioreg)?.[1]?.trim()
+  return uuid === undefined || uuid.length === 0 ? null : uuid
 }
 
+type CommandRunner = (command: string, args: readonly string[], timeoutMs: number) => Promise<string | null>
+
 /**
- * Decides whether a lock's recorded launcher is this machine.
- *
- * A record carrying a host id matches only that exact id, so two machines that happen to share a
- * hostname (or two Macs behind one DHCP server) stay distinct while a single machine that was
- * renamed by DHCP still matches. Legacy records carry no id and keep the exact hostname rule.
+ * Absolute path, because a child spawned without `PATH` fails a bare `ioreg` with ENOENT and would
+ * silently drop every machine to "no identity".
  */
-export function isLocalHost(
-  recorded: { readonly hostname: string; readonly hostId?: string },
-  current: { readonly hostname: string; readonly hostId?: string | null },
-): boolean {
-  if (typeof recorded.hostId === "string" && recorded.hostId.length > 0) {
-    return current.hostId !== undefined && current.hostId !== null && recorded.hostId === current.hostId
+export function createPlatformUuidReader(run: CommandRunner = readCommandOutput): () => Promise<string | null> {
+  return async () => parsePlatformUuid(await run("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], 1_000))
+}
+
+const readDarwinPlatformUuid = createPlatformUuidReader()
+
+/** Single flight, and only an answer is remembered: caching `null` would pin a busy process to "unknown machine". */
+export function createMachineIdResolver(read: () => Promise<string | null>): () => Promise<string | null> {
+  let cached: Promise<string | null> | undefined
+  return () => {
+    if (cached !== undefined) return cached
+    let pending: Promise<string | null>
+    pending = read().then((value) => {
+      if (value === null && cached === pending) cached = undefined
+      return value
+    })
+    cached = pending
+    return pending
+  }
+}
+
+/** This machine's identity, or `null` where no probe exists. The prefix makes `active.lock` self-describing. */
+export const getStableLocalHostId = createMachineIdResolver(async () => {
+  if (process.platform !== "darwin") return null
+  const uuid = await readDarwinPlatformUuid()
+  return uuid === null ? null : `darwin-uuid:${uuid}`
+})
+
+/**
+ * Two known ids must match, so machines sharing a hostname stay distinct while one renamed by DHCP
+ * still matches. A missing id on either side falls back to the hostname, because an unknown id never
+ * proves another host.
+ */
+export function isLocalHost(recorded: HostIdentity, current: HostIdentity): boolean {
+  const recordedId = recorded.hostId
+  const currentId = current.hostId
+  if (typeof recordedId === "string" && recordedId.length > 0 && typeof currentId === "string" && currentId.length > 0) {
+    return recordedId === currentId
   }
   return recorded.hostname === current.hostname
 }
