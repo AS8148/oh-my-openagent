@@ -85,4 +85,22 @@ describe("job widget author on the quick category", () => {
     releaseB()
     expect(host.current()).toBeUndefined()
   })
+
+  it("#given a host whose session never shut down #when a session installs on a second host #then the second host gets its own route", () => {
+    // given
+    const leaked = fakeHost()
+    installJobWidgetAuthor(leaked, "/project-a", quickConfig)
+    const host = fakeHost()
+
+    // when
+    const release = installJobWidgetAuthor(host, "/project-b", quickConfig)
+
+    // then
+    expect(host.installs).toBe(1)
+    expect(host.current()?.({ cwd: "/project-b", modelRegistry: registry([sessionModel, quickModel]) })).toBe(quickModel)
+    expect(host.current()?.({ cwd: "/project-a", modelRegistry: registry([sessionModel, quickModel]) })).toBeUndefined()
+    release()
+    expect(host.current()).toBeUndefined()
+    expect(leaked.current()).toBeDefined()
+  })
 })

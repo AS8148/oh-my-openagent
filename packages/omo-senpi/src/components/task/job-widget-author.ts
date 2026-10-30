@@ -15,31 +15,41 @@ export function resolveJobWidgetAuthorModel(
 
 type AuthorConfig = { readonly cwd: string; readonly omoConfig: OmoConfig }
 
-// senpi keeps ONE author route per process while a shared daemon runs many sessions, each with the
-// omo.json of its own project. Every registered session adds its config here; the route answers with
-// the config of the session asking (matched by cwd) and leaves a session it does not know to senpi's
-// fallback, the session model. The route is withdrawn when the last session releases it.
-const authorConfigs: AuthorConfig[] = []
-let withdrawRoute: (() => void) | undefined
+type AuthorRoute = { readonly configs: AuthorConfig[]; withdraw: (() => void) | undefined }
 
-function routeAuthor(ctx: JobWidgetAuthorContext): SenpiModelPort | undefined {
-  const config = authorConfigs.findLast((entry) => entry.cwd === ctx.cwd)
+// senpi keeps ONE author route per host while a shared daemon runs many sessions, each with the
+// omo.json of its own project. Every registered session adds its config to its host's route; the route
+// answers with the config of the session asking (matched by cwd) and leaves a session it does not know to
+// senpi's fallback, the session model. The route is withdrawn when the last session on that host releases
+// it. State is keyed by host (one per loaded senpi module, see readJobWidgetHost), so a second host never
+// inherits or skips another host's route.
+const routes = new WeakMap<JobWidgetHostApi, AuthorRoute>()
+
+function routeAuthor(configs: readonly AuthorConfig[], ctx: JobWidgetAuthorContext): SenpiModelPort | undefined {
+  const config = configs.findLast((entry) => entry.cwd === ctx.cwd)
   return config === undefined ? undefined : resolveJobWidgetAuthorModel(config.omoConfig, ctx.modelRegistry)
 }
 
 export function installJobWidgetAuthor(host: JobWidgetHostApi, cwd: string, omoConfig: OmoConfig): () => void {
   const setAuthorResolver = host.setAuthorResolver
   if (setAuthorResolver === undefined) return () => {}
+  let route = routes.get(host)
+  if (route === undefined) {
+    route = { configs: [], withdraw: undefined }
+    routes.set(host, route)
+  }
   const config: AuthorConfig = { cwd, omoConfig }
-  authorConfigs.push(config)
-  withdrawRoute ??= setAuthorResolver(routeAuthor)
+  route.configs.push(config)
+  const configs = route.configs
+  route.withdraw ??= setAuthorResolver((ctx) => routeAuthor(configs, ctx))
   let released = false
+  const owned = route
   return () => {
     if (released) return
     released = true
-    authorConfigs.splice(authorConfigs.indexOf(config), 1)
-    if (authorConfigs.length > 0) return
-    withdrawRoute?.()
-    withdrawRoute = undefined
+    owned.configs.splice(owned.configs.indexOf(config), 1)
+    if (owned.configs.length > 0) return
+    owned.withdraw?.()
+    owned.withdraw = undefined
   }
 }
