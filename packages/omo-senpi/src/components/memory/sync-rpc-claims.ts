@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 import { z } from "zod"
 import { withLock } from "@oh-my-opencode/team-core/team-state-store/locks"

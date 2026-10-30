@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile } from "@oh-my-opencode/memory-core/fs"
 import { homedir } from "node:os"
 import { z } from "zod"
 import { credentialLockPaths, withCredentialLock } from "@oh-my-opencode/omo-opencode/service-auth"
