@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 /** One synthetic certificate. `extensions` is the body of an OpenSSL config section. */
-export type CertificateSpec = {
+type CertificateSpec = {
   readonly name: string
   readonly subject: string
   /** Name of an earlier spec; absent means self-signed. */

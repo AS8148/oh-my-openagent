@@ -1,9 +1,9 @@
-//! Native fact helper for the engine CA importer (omo#10762, design revision 12, sections 4.1, 4.2, 4.4 and 6.2).
+//! Native fact helper for the engine CA importer (omo#10762, design sections 4.1, 4.2, 4.4 and 6.2).
 //!
-//! The helper reads the platform trust store (macOS Security.framework, Windows Crypt32) in its own
-//! killable process and writes one bounded JSON document of facts to stdout. It makes no trust decision:
-//! `packages/omo-native/macos-trust-helper.ts` and `packages/omo-native/windows-trust-helper.ts` decode the
-//! document and `packages/omo-native/engine-trust-policy.ts` decides.
+//! The helper reads macOS Security.framework or Windows Crypt32 in its own killable process and writes one
+//! bounded JSON document of facts to stdout. It makes no trust decision: `packages/omo-native/macos-trust-helper.ts`
+//! and `packages/omo-native/windows-trust-helper.ts` decode the document and
+//! `packages/omo-native/engine-trust-policy.ts` decides.
 
 pub mod document;
 #[cfg(target_os = "macos")]
