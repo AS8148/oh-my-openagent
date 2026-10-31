@@ -54,6 +54,10 @@ test("the bundle keeps the runtime entry", () => {
   expect(bundle.length).toBeGreaterThan(0)
   expect(parseExports(bundle)).toEqual(["main"])
 })
+test("yields one tick before asserting", async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(flushed).toBe(true)
+})
 `
 
 const JUNK_PY = `import time
@@ -61,6 +65,8 @@ def test_sleeps():
     time.sleep(1)
 def test_lower():
     assert len(items) >= 2
+def test_lower_nested():
+    assert len(select(items)) > 1
 def test_prose():
     body = Path("SKILL.md").read_text()
     assert "You are" in body
@@ -104,7 +110,8 @@ describe("#given test files with mechanically detectable junk", () => {
     expect(findings.map((finding) => [finding.file.split("/").at(-1), finding.line, finding.rule])).toEqual([
       ["test_junk.py", 3, "fixed-sleep"],
       ["test_junk.py", 5, "lower-bound"],
-      ["test_junk.py", 8, "prose-pin"],
+      ["test_junk.py", 7, "lower-bound"],
+      ["test_junk.py", 10, "prose-pin"],
       ["junk_test.go", 2, "fixed-sleep"],
       ["junk_test.go", 3, "skipped"],
     ])

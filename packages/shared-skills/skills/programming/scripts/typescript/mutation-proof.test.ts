@@ -33,9 +33,11 @@ describe("#given a production owner and a test that exercises it", () => {
     expect(readFileSync(join(root, "owner.ts"), "utf8")).toBe(OWNER)
   })
 
-  test("#when the find text is not unique #then it refuses before touching the file", async () => {
-    const attempt = runMutation({ cwd: root, file: "owner.ts", find: "a", replace: "x", tests: [] })
-    await expect(attempt).rejects.toBeInstanceOf(MutationError)
+  test("#when the find text is not unique or empty #then it refuses before touching the file", async () => {
+    for (const [find, kind] of [["a", "FIND_NOT_UNIQUE"], ["", "FIND_EMPTY"]] as const) {
+      const attempt = runMutation({ cwd: root, file: "owner.ts", find, replace: "x", tests: [] })
+      await expect(attempt).rejects.toMatchObject({ kind })
+    }
     expect(readFileSync(join(root, "owner.ts"), "utf8")).toBe(OWNER)
   })
 })

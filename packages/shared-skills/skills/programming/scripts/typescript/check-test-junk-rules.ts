@@ -60,7 +60,7 @@ export const LINE_RULES: readonly LineRule[] = [
   {
     rule: "fixed-sleep",
     languages: ["typescript"],
-    pattern: /\bsetTimeout\s*\(\s*(resolve|res|r|done|cb)\s*,|\bawait\s+(Bun\.)?sleep\s*\(\s*\d|new Promise\s*\(\s*\(?\s*\w*\s*\)?\s*=>\s*setTimeout\s*\(/,
+    pattern: /\bsetTimeout\s*\(\s*(resolve|res|r|done|cb)\s*,\s*[1-9]|\bawait\s+(Bun\.)?sleep\s*\(\s*[1-9]|new Promise\s*\(\s*\(?\s*\w*\s*\)?\s*=>\s*setTimeout\s*\(\s*\w+\s*,\s*[1-9]/,
     message: SLEEP_MESSAGE,
   },
   { rule: "fixed-sleep", languages: ["python"], pattern: /\btime\.sleep\s*\(|\bawait\s+(asyncio|anyio|trio)\.sleep\s*\(\s*[0-9]/, message: SLEEP_MESSAGE },
@@ -85,7 +85,7 @@ export const LINE_RULES: readonly LineRule[] = [
   {
     rule: "lower-bound",
     languages: ["python"],
-    pattern: /\bassert\s+len\s*\([^)]*\)\s*(>\s*[1-9]|>=\s*([2-9]|\d{2,}))/,
+    pattern: /\bassert\s+len\s*\(.+\)\s*(>\s*[1-9]|>=\s*([2-9]|\d{2,}))/,
     message: LOWER_BOUND_MESSAGE,
   },
 ]

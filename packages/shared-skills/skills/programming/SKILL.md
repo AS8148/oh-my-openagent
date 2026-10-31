@@ -203,11 +203,9 @@ uv run scripts/python/check-no-excuse-rules.py <changed paths>
 bash scripts/rust/check-no-excuse-rules.sh <changed paths>
 # TypeScript
 bun run scripts/typescript/check-no-excuse-rules.ts <changed paths>
-# Any language, test files you touched: the junk classes a regex can see
+# Any language, test files you touched: the junk classes a regex can see (candidates for "test your test")
 bun run scripts/typescript/check-test-junk.ts <changed test paths>
 ```
-
-A `check-test-junk` finding is a candidate, not a verdict: prove or clear it with `references/testing/README.md` "test your test" (`scripts/typescript/mutation-proof.ts` applies the mutation, runs the tests, restores the owner byte for byte).
 
 ### Step 2 — interpret
 

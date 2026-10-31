@@ -7,13 +7,13 @@
  *   bun run scripts/typescript/mutation-proof.ts --file <path> --find <text> --replace <text> \
  *     --test '<label>=<argv...>' [--test ...] [--cwd <dir>] [--json]
  *
- *   --test takes "label=command words"; words split on spaces, so quote a word with spaces as
- *   "label=bun test src/x.test.ts -t 'rejects equal'" is NOT supported: pass the test name through
- *   a pattern without spaces or run the whole file.
+ *   --test takes "label=command words"; the command is split on spaces and quoting is not
+ *   supported, so select a test by a pattern without spaces or run the whole file.
  *
  * Verdicts per test: red (exit != 0, the test caught the mutation) or green (exit 0, it did not).
- * Exit codes: 0 ran and restored, 1 the find text did not match exactly once or the restore
- * hash differed (the file was still restored), 2 usage.
+ * The owner is restored on success, on a thrown error, and on SIGINT/SIGTERM.
+ * Exit codes: 0 ran and restored, 1 the find text is empty or did not match exactly once or the
+ * restore hash differed (the file was still restored), 2 usage, 130/143 interrupted and restored.
  * Read references/testing/junk-classes.md "Proof rule" for how to read a candidate/keeper pair.
  */
 
@@ -44,7 +44,7 @@ export type MutationResult = {
 
 export class MutationError extends Error {
   constructor(
-    readonly kind: "FIND_NOT_UNIQUE" | "RESTORE_MISMATCH",
+    readonly kind: "FIND_EMPTY" | "FIND_NOT_UNIQUE" | "RESTORE_MISMATCH",
     message: string,
   ) {
     super(message)
@@ -72,6 +72,7 @@ export async function runMutation(options: {
   readonly replace: string
   readonly tests: readonly MutationTest[]
 }): Promise<MutationResult> {
+  if (options.find.length === 0) throw new MutationError("FIND_EMPTY", `${options.file}: find text is empty`)
   const full = resolve(options.cwd, options.file)
   const original = readFileSync(full)
   const text = original.toString("utf8")
@@ -81,6 +82,12 @@ export async function runMutation(options: {
   }
   const originalSha256 = sha256(original)
   const outcomes: MutationOutcome[] = []
+  const restoreOnSignal = (signal: NodeJS.Signals): void => {
+    writeFileSync(full, original)
+    process.exit(signal === "SIGINT" ? 130 : 143)
+  }
+  process.on("SIGINT", restoreOnSignal)
+  process.on("SIGTERM", restoreOnSignal)
   try {
     writeFileSync(full, text.replace(options.find, () => options.replace))
     for (const test of options.tests) {
@@ -95,6 +102,8 @@ export async function runMutation(options: {
     }
   } finally {
     writeFileSync(full, original)
+    process.off("SIGINT", restoreOnSignal)
+    process.off("SIGTERM", restoreOnSignal)
   }
   const restoredSha256 = sha256(readFileSync(full))
   if (restoredSha256 !== originalSha256) {
