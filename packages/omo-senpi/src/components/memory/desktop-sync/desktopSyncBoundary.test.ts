@@ -79,10 +79,12 @@ describe("the canonical lock and record paths", () => {
     // The desktop vendored lock module asserts the same vector; a drift on either side splits the lock.
     const paths = credentialLockPaths("https://api.omo.dev", "/home/fixture")
     const id = "71643f4acfe42d71eb5b691bc773d98f41e05a6589f10347e4146f4a81cebbd2"
+    // The id is the cross-repo vector; the separators are the platform's own, as on the desktop side.
+    const directory = join("/home/fixture", ".omo", "session-locks")
     expect(paths).toEqual({
-      directory: "/home/fixture/.omo/session-locks",
-      lock: `/home/fixture/.omo/session-locks/${id}.lock`,
-      desktopRecord: `/home/fixture/.omo/session-locks/${id}.desktop-generation.json`,
+      directory,
+      lock: join(directory, `${id}.lock`),
+      desktopRecord: join(directory, `${id}.desktop-generation.json`),
     })
   })
 })
