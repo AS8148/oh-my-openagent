@@ -1,6 +1,8 @@
 import { afterEach, expect, spyOn, test } from "bun:test"
 import { readFileSync, writeFileSync } from "node:fs"
 import * as fs from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { withLock } from "../../locks/acquire.ts"
 import { createLockRecord } from "../../locks/lock-record.ts"
@@ -99,7 +101,11 @@ test("pin boundary taken first publishes once, and a sibling replacement waiting
   const { authority, entries } = lockedBoundary(credentials, async () => { held.resolve(); await trying.promise })
   let renames = 0
   const original = fs.renameSync
-  const spy = spyOn(fs, "renameSync").mockImplementation((from, to) => { renames++; order.push("rename"); original(from, to) })
+  // fs is process-global: count only the pin publication's renames, not other files' writes in this bun process.
+  const spy = spyOn(fs, "renameSync").mockImplementation((from, to) => {
+    if (String(to).startsWith(f.input.pinDir)) { renames++; order.push("rename") }
+    original(from, to)
+  })
   cleanup.push(() => spy.mockRestore())
 
   // given: the pin boundary holds the credential lock before the sibling writer starts
@@ -114,7 +120,12 @@ test("pin boundary taken first publishes once, and a sibling replacement waiting
   })
   cleanup.push(async () => { if (child.exitCode === null) child.kill(); await child.exited })
 
-  // when: the writer is already contending for the lock while the publication proceeds
+  // when: the writer is already contending for the lock while the publication proceeds,
+  // and an unrelated file elsewhere in this process is renamed in the same window (#11963)
+  const unrelated = await mkdtemp(join(tmpdir(), "boundary-unrelated-"))
+  cleanup.push(() => rm(unrelated, { recursive: true, force: true }))
+  writeFileSync(join(unrelated, "a.tmp"), "x")
+  fs.renameSync(join(unrelated, "a.tmp"), join(unrelated, "a.json"))
   await result
   order.push("published")
   await locked.promise
