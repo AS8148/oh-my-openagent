@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import * as fs from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 import { withLock } from "../../locks/acquire.ts"
 import { createLockRecord } from "../../locks/lock-record.ts"
 import { pinTrustAnchor } from "../crypto/trust-pin.ts"
@@ -11,6 +11,13 @@ import { walk } from "../genesis/vector.test-support.ts"
 import { ACCOUNT, fixture } from "./testing/genesis-enable.test-support.ts"
 
 const cleanup: (() => void | Promise<void>)[] = []
+
+// fs is process-global: a renameSync spy also sees other files' writes in this bun process (#11963),
+// so the spies below only count, or interfere with, renames that land inside the pin directory.
+const landsIn = (dir: string, to: fs.PathLike): boolean => {
+  const rel = relative(dir, String(to))
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)
+}
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
 for (const change of ["replacement", "aba", "refresh", "signing", "sealing"] as const) {
@@ -48,7 +55,7 @@ for (const change of ["replacement", "aba", "refresh", "signing", "sealing"] as 
     }
     let renames = 0
     const original = fs.renameSync
-    const spy = spyOn(fs, "renameSync").mockImplementation((from, to) => { renames++; original(from, to) })
+    const spy = spyOn(fs, "renameSync").mockImplementation((from, to) => { if (landsIn(f.input.pinDir, to)) renames++; original(from, to) })
     cleanup.push(() => spy.mockRestore())
     const result = pinTrustAnchor(f.input.pinDir, ACCOUNT, verified.state.pin, { authority })
     const first = await Promise.race([entered.promise.then(() => "boundary"), result.then(() => "published")])
@@ -101,9 +108,8 @@ test("pin boundary taken first publishes once, and a sibling replacement waiting
   const { authority, entries } = lockedBoundary(credentials, async () => { held.resolve(); await trying.promise })
   let renames = 0
   const original = fs.renameSync
-  // fs is process-global: count only the pin publication's renames, not other files' writes in this bun process.
   const spy = spyOn(fs, "renameSync").mockImplementation((from, to) => {
-    if (String(to).startsWith(f.input.pinDir)) { renames++; order.push("rename") }
+    if (landsIn(f.input.pinDir, to)) { renames++; order.push("rename") }
     original(from, to)
   })
   cleanup.push(() => spy.mockRestore())
@@ -149,7 +155,9 @@ test("an EINTR retry of the pin rename re-enters the boundary and cannot publish
   writeFileSync(credentials, JSON.stringify({ identity: "A", generation: 1, token: 1 }))
   const { authority, entries, controller } = lockedBoundary(credentials, async () => undefined)
   let renames = 0
-  const spy = spyOn(fs, "renameSync").mockImplementation(() => {
+  const original = fs.renameSync
+  const spy = spyOn(fs, "renameSync").mockImplementation((from, to) => {
+    if (!landsIn(f.input.pinDir, to)) return original(from, to)
     renames++
     // given: the first raw rename is interrupted, and a credential replacement lands before the retry
     writeFileSync(credentials, JSON.stringify({ identity: "B", generation: 2, token: 1 }))
