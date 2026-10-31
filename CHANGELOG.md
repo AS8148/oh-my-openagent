@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.1.53] - 2026-10-31
 
-5.1.52 was not published; its changes ship here.
+5.1.52 was not published; its changes, listed under 5.1.52 below, ship in this release.
 
 Runs on senpi 2026.10.30-1: a long background command that prints numbers shows a live chart above the editor, error messages name the cause and one next step, MCP OAuth never sends a saved grant to an authorization server it is not bound to, and Linux ext4/xfs paths are no longer all treated as possible aliases by permission checks. ([#11918](https://github.com/code-yeongyu/oh-my-openagent/pull/11918))
 
@@ -88,7 +88,7 @@ Memory sync can now be turned on for the first device of an account: it creates 
 - Add the trust diagnostics record for the planned engine CA importer: one JSON line per launch in `diagnostics.jsonl` (mode 0600, one append-mode write, rotated at 256 KiB), limited to a closed set of codes and never holding a path, environment value or certificate. Nothing uses it yet. ([#11552](https://github.com/code-yeongyu/oh-my-openagent/pull/11552), part of [#10762](https://github.com/code-yeongyu/oh-my-openagent/issues/10762))
 - Add the macOS certificate fact helper for the planned engine CA importer: a separate, self-limiting process reads the macOS trust settings and keychain certificates and reports them, and a strict decoder rejects any output it cannot fully account for. Nothing uses it yet. ([#11494](https://github.com/code-yeongyu/oh-my-openagent/pull/11494), part of [#10762](https://github.com/code-yeongyu/oh-my-openagent/issues/10762))
 
-### Also in this release: the changes prepared for 5.1.52
+## [5.1.52] - 2026-10-29
 
 **Lower memory and fewer filesystem calls.** A TypeScript LSP session now runs two processes instead of four and measured 292 MiB instead of 597 MiB on a small project; on a Bun host it also runs on that Bun instead of `node`, measured 236-245 MiB instead of 290-296 MiB ([#11766](https://github.com/code-yeongyu/oh-my-openagent/pull/11766)). On senpi 2026.10.27-2, reopening a session with many skills makes 5,320 filesystem calls instead of 11,050 (150 skills plus 122 copies) ([#11556](https://github.com/code-yeongyu/oh-my-openagent/pull/11556)).
 
@@ -99,6 +99,8 @@ Memory sync can now be turned on for the first device of an account: it creates 
 Runs on senpi 2026.10.27-2: reopening a session with many skills makes far fewer filesystem calls (150 skills plus 122 copies: 11,050 down to 5,320, measured in senpi #4423), the TUI no longer runs out of memory on very wide tool results, Claude subscription compaction summarizes again, and with both a subscription sign-in and an API key for the same vendor, new sessions without a saved default start on the subscription. The `ask_user_question` tool description the model sees gains one sentence: do not ask the user when they have said not to. ([#11556](https://github.com/code-yeongyu/oh-my-openagent/pull/11556))
 
 The memory kibitzer now redacts the same secrets the engine does: API keys, GitHub tokens and JWTs are masked wherever they appear in what it records, not only after a recognized variable name. ([#11556](https://github.com/code-yeongyu/oh-my-openagent/pull/11556))
+
+**Installers and the OmO Native first-run notice now describe telemetry.** `install.sh`, `install.ps1`, `bunx oh-my-openagent install`, `lazycodex-ai install` and `omo setup` end with a short notice: what anonymous usage telemetry contains, that it goes to PostHog in the United States, how to turn it off (`DO_NOT_TRACK=1` or `OMO_DISABLE_TELEMETRY=1`), and a link to the privacy policy. The one-time OmO Native notice names the same destination, both opt-outs (including `"telemetry": { "enabled": false }` in `~/.omo/omo.jsonc`) and the privacy policy. ([#11608](https://github.com/code-yeongyu/oh-my-openagent/pull/11608)) ([#11555](https://github.com/code-yeongyu/oh-my-openagent/pull/11555))
 
 **Echo argv no longer earns a test receipt.** Claim receipts keep runner argv as one invocation and read a `[name, command]` pair only in its nested-pair position. Genuine test argv and nested command pairs still count. ([#11542](https://github.com/code-yeongyu/oh-my-openagent/pull/11542)) Thanks to [@MoerAI](https://github.com/MoerAI). ([#11555](https://github.com/code-yeongyu/oh-my-openagent/pull/11555))
 
